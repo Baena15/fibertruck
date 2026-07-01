@@ -1,9 +1,10 @@
 """
-Auto-setup para Railway - crea usuarios + ejecuta populate_cieza si no hay datos.
+Auto-setup para Railway - crea usuarios y ejecuta populate_cieza.
+Se ejecuta en cada arranque pero solo crea datos si faltan.
 """
 from django.core.management.base import BaseCommand
 from django.contrib.auth import get_user_model
-from network.models import OLT
+from network.models import FiberCable
 
 User = get_user_model()
 
@@ -23,10 +24,11 @@ class Command(BaseCommand):
             User.objects.create_user('supervisor1', password='super123', first_name='Supervisor', last_name='NOC', role='supervisor')
             self.stdout.write(self.style.SUCCESS('Usuario supervisor1 creado'))
 
-        # Ejecutar populate_cieza si no hay OLT
-        if not OLT.objects.exists():
-            self.stdout.write(self.style.MIGRATE_HEADING('=== Ejecutando populate_cieza ==='))
+        # Ejecutar populate_cieza si no hay cables (nuevos modelos v2)
+        if not FiberCable.objects.exists():
+            self.stdout.write(self.style.MIGRATE_HEADING('=== Ejecutando populate_cieza (v2) ==='))
             from django.core.management import call_command
             call_command('populate_cieza')
         else:
-            self.stdout.write(self.style.SUCCESS('Despliegue ya existe'))
+            count = FiberCable.objects.count()
+            self.stdout.write(self.style.SUCCESS(f'Despliegue v2 ya existe: {count} cables'))
