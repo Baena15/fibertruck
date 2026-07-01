@@ -14,13 +14,16 @@
     .severity-critical { border-left: 4px solid #dc2626; background: #fef2f2; }
     .severity-high { border-left: 4px solid #f59e0b; background: #fffbeb; }
     .severity-medium { border-left: 4px solid #3b82f6; background: #eff6ff; }
-    .severity-low { border-left: 4px solid #10b981; background: #ecfdf5; }
-    .power-bar-bg { background: #e5e7eb; height: 20px; border-radius: 4px; }
-    .power-bar-fill { height: 100%; border-radius: 4px; transition: width 0.5s; }
   </style>
 </head>
 <body class="bg-gray-100">
   <div id="root"></div>
+  <script>
+    window.onerror = function(msg, url, line, col, err) {
+      document.body.innerHTML = '<div style="padding:40px;font-family:monospace;"><h2 style="color:red">JavaScript Error</h2><pre style="background:#fee;padding:20px;border-radius:8px">' + msg + '\nLine: ' + line + '\nURL: ' + (url||'') + '</pre></div>';
+      return true;
+    };
+  </script>
   <script type="text/javascript" src="/static/frontend/app.jsx"></script>
 </body>
 </html>
