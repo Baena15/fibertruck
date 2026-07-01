@@ -2,15 +2,21 @@
 FiberTruck API Views
 CRUD + Algoritmo de diagnostico LCA (Fault Locator)
 """
+import json
 from rest_framework import viewsets, status, permissions
 from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.response import Response
 from django.contrib.auth import get_user_model
+from django.db.models import Count, Q
 from core.views import IsAdmin, IsSupervisor, IsTechnician
-from .models import OLT, Zone, Splitter, FiberBox, Client, FiberIncident
+from .models import (
+    OLT, Zone, Splitter, FiberBox, Client, FiberIncident,
+    FiberCable, SpliceClosure, CableSegment, FiberAssignment,
+)
 from .serializers import (
     OLTSerializer, ZoneSerializer, SplitterSerializer,
-    FiberBoxSerializer, ClientSerializer, ClientListSerializer, FiberIncidentSerializer
+    FiberBoxSerializer, ClientSerializer, ClientListSerializer, FiberIncidentSerializer,
+    FiberCableSerializer, SpliceClosureSerializer, CableSegmentSerializer, FiberAssignmentSerializer,
 )
 
 
@@ -370,3 +376,470 @@ class FiberIncidentViewSet(viewsets.ModelViewSet):
             'active_boxes': FiberBox.objects.filter(is_active=True).count(),
             'faulty_boxes': FiberBox.objects.filter(status='fault', is_active=True).count(),
         })
+
+
+# ============================================================
+# NUEVOS VIEWSETS FTTH - Ingenieria de Red
+# ============================================================
+
+class FiberCableViewSet(viewsets.ReadOnlyModelViewSet):
+    """
+    ViewSet de solo lectura para cables de fibra optica.
+    Expone datos de ingenieria: tipo, capacidad, uso y tramos.
+    """
+    queryset = FiberCable.objects.all()
+    serializer_class = FiberCableSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    @action(detail=False, methods=['get'])
+    def by_type(self, request):
+        """Filtrar cables por tipo: feeder, distribution, drop"""
+        cable_type = request.query_params.get('type')
+        if cable_type:
+            qs = self.queryset.filter(cable_type=cable_type, is_active=True)
+            return Response(FiberCableSerializer(qs, many=True).data)
+        return Response([])
+
+    @action(detail=False, methods=['get'])
+    def utilization(self, request):
+        """Resumen de utilizacion de todos los cables"""
+        cables = self.queryset.filter(is_active=True)
+        data = []
+        for cable in cables:
+            data.append({
+                'id': cable.id,
+                'code': cable.code,
+                'name': cable.name,
+                'type': cable.cable_type,
+                'fiber_count': cable.fiber_count,
+                'fibers_used': cable.fibers_used,
+                'fibers_free': cable.fibers_free,
+                'utilization_percent': round(cable.utilization_percent, 1),
+            })
+        return Response(data)
+
+
+class SpliceClosureViewSet(viewsets.ReadOnlyModelViewSet):
+    """
+    ViewSet de solo lectura para cajas de empalme.
+    Incluye filtrado por zona.
+    """
+    queryset = SpliceClosure.objects.all()
+    serializer_class = SpliceClosureSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    @action(detail=False, methods=['get'])
+    def by_zone(self, request):
+        """Filtrar empalmes por zona: ?zone=<id>"""
+        zone_id = request.query_params.get('zone')
+        if zone_id:
+            qs = self.queryset.filter(zone_id=zone_id, is_active=True)
+            return Response(SpliceClosureSerializer(qs, many=True).data)
+        return Response([])
+
+
+class CableSegmentViewSet(viewsets.ReadOnlyModelViewSet):
+    """
+    ViewSet de solo lectura para tramos de cable.
+    Permite filtrar por zona y por tipo feeder.
+    """
+    queryset = CableSegment.objects.all()
+    serializer_class = CableSegmentSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    @action(detail=False, methods=['get'])
+    def by_zone(self, request):
+        """Filtrar tramos por zona: ?zone=<id>"""
+        zone_id = request.query_params.get('zone')
+        if zone_id:
+            qs = self.queryset.filter(
+                Q(cable__fiberassignment__box__zone_id=zone_id) |
+                Q(to_splitter__zone_id=zone_id) |
+                Q(to_box__zone_id=zone_id),
+                is_active=True
+            ).distinct()
+            return Response(CableSegmentSerializer(qs, many=True).data)
+        return Response([])
+
+    @action(detail=False, methods=['get'])
+    def feeder(self, request):
+        """Devuelve solo los tramos feeder (olt_to_splice)"""
+        qs = self.queryset.filter(segment_type='olt_to_splice', is_active=True)
+        return Response(CableSegmentSerializer(qs, many=True).data)
+
+    @action(detail=False, methods=['get'])
+    def by_type(self, request):
+        """Filtrar tramos por tipo: ?type=splitter_to_box"""
+        seg_type = request.query_params.get('type')
+        if seg_type:
+            qs = self.queryset.filter(segment_type=seg_type, is_active=True)
+            return Response(CableSegmentSerializer(qs, many=True).data)
+        return Response([])
+
+
+class FiberAssignmentViewSet(viewsets.ReadOnlyModelViewSet):
+    """
+    ViewSet de solo lectura para asignaciones de fibra.
+    Permite filtrar por cable y por caja.
+    """
+    queryset = FiberAssignment.objects.all()
+    serializer_class = FiberAssignmentSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    @action(detail=False, methods=['get'])
+    def by_cable(self, request):
+        """Filtrar asignaciones por cable: ?cable=<id>"""
+        cable_id = request.query_params.get('cable')
+        if cable_id:
+            qs = self.queryset.filter(cable_id=cable_id)
+            return Response(FiberAssignmentSerializer(qs, many=True).data)
+        return Response([])
+
+    @action(detail=False, methods=['get'])
+    def by_box(self, request):
+        """Filtrar asignaciones por caja: ?box=<id>"""
+        box_id = request.query_params.get('box')
+        if box_id:
+            qs = self.queryset.filter(box_id=box_id)
+            return Response(FiberAssignmentSerializer(qs, many=True).data)
+        return Response([])
+
+
+# ============================================================
+# ENDPOINTS FTTH AVANZADOS - Diagnostico y Topologia
+# ============================================================
+
+@api_view(['POST'])
+@permission_classes([permissions.IsAuthenticated])
+def diagnose_v2(request):
+    """
+    Diagnostico avanzado FTTH v2.
+
+    Entrada: {"box_code": "CTO-023", "affected_client_ids": [45, 46, 47]}
+
+    Salida:
+    {
+        "severity": "critical|high|medium|low",
+        "confidence": 95,
+        "affected_segment": {...},
+        "power_analysis": {...},
+        "fault_location": {...},
+        "recommended_action": "...",
+        "affected_clients": [...],
+        "affected_route": [[lat,lng], ...]
+    }
+    """
+    box_code = request.data.get('box_code', '')
+    affected_client_ids = request.data.get('affected_client_ids', [])
+
+    if not box_code:
+        return Response({'error': 'box_code es requerido'}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        box = FiberBox.objects.select_related('splitter', 'splitter__olt', 'zone').get(code__iexact=box_code, is_active=True)
+    except FiberBox.DoesNotExist:
+        return Response({'error': f'Caja {box_code} no encontrada'}, status=status.HTTP_404_NOT_FOUND)
+
+    # Obtener clientes afectados
+    if affected_client_ids:
+        affected_clients = Client.objects.filter(
+            id__in=affected_client_ids, box=box, is_active=True
+        ).select_related('box')
+    else:
+        affected_clients = Client.objects.filter(
+            box=box, status='affected', is_active=True
+        ).select_related('box')
+
+    affected_count = affected_clients.count()
+
+    # Verificar si hay mas clientes afectados en cajas del mismo splitter
+    splitter_affected_boxes = FiberBox.objects.filter(
+        splitter=box.splitter, is_active=True
+    ).annotate(
+        affected_client_count=Count('clients', filter=Q(clients__status='affected', clients__is_active=True))
+    )
+    boxes_with_issues = [b for b in splitter_affected_boxes if b.affected_client_count > 0]
+    total_affected_in_splitter = sum(b.affected_client_count for b in boxes_with_issues)
+
+    # Determinar severidad segun reglas de negocio
+    if total_affected_in_splitter >= 3:
+        severity = 'critical'
+        confidence = min(85 + (total_affected_in_splitter - 3) * 5, 99)
+    elif affected_count >= 3:
+        severity = 'high'
+        confidence = 80
+    elif affected_count >= 2:
+        severity = 'medium'
+        confidence = 65
+    else:
+        severity = 'low'
+        confidence = 50
+
+    # Buscar tramos afectados en la topologia
+    affected_segments = CableSegment.objects.filter(
+        Q(to_box=box) | Q(from_splitter=box.splitter) | Q(to_splitter=box.splitter),
+        is_active=True
+    ).select_related('cable').order_by('segment_type')
+
+    # Seleccionar el tramo mas probable (prioridad: splitter_to_box > distribution > feeder)
+    affected_segment_data = None
+    for seg in affected_segments:
+        if seg.segment_type == 'splitter_to_box':
+            affected_segment_data = seg
+            break
+    if not affected_segment_data:
+        affected_segment_data = affected_segments.first()
+
+    # Construir datos del tramo afectado
+    segment_json = None
+    if affected_segment_data:
+        segment_json = {
+            'id': affected_segment_data.id,
+            'segment_type': affected_segment_data.segment_type,
+            'cable': affected_segment_data.cable.code if affected_segment_data.cable else None,
+            'fiber_numbers': affected_segment_data.fiber_numbers,
+            'attenuation_db': affected_segment_data.attenuation_db,
+            'length_m': affected_segment_data.length_m,
+            'route_coordinates': affected_segment_data.route_as_list,
+        }
+
+    # Calcular potencia esperada vs real
+    splitter_loss = box.splitter.insertion_loss_db if hasattr(box.splitter, 'insertion_loss_db') else 17.0
+    olt_power = box.splitter.olt.output_power_dbm if hasattr(box.splitter.olt, 'output_power_dbm') else 3.0
+
+    expected_dbm = round(olt_power - splitter_loss - 0.4 * (affected_segment_data.length_m / 1000 if affected_segment_data else 0), 2)
+
+    # Potencia medida promedio de clientes afectados
+    measured_powers = [c.optical_power_rx for c in affected_clients if c.optical_power_rx is not None]
+    measured_dbm = round(sum(measured_powers) / len(measured_powers), 2) if measured_powers else -45.0
+    loss_db = round(expected_dbm - measured_dbm, 2) if measured_dbm else 27.5
+
+    if loss_db > 20:
+        power_status = 'CORTE TOTAL'
+    elif loss_db > 10:
+        power_status = 'PERDIDA SEVERA'
+    elif loss_db > 5:
+        power_status = 'PERDIDA MODERADA'
+    else:
+        power_status = 'NORMAL'
+
+    # Coordenadas para la ruta afectada
+    affected_route = []
+    if affected_segment_data and affected_segment_data.route_as_list:
+        affected_route = affected_segment_data.route_as_list
+    else:
+        # Construir ruta desde splitter hasta caja
+        affected_route = [
+            [box.splitter.latitude, box.splitter.longitude],
+            [box.latitude, box.longitude],
+        ]
+
+    # Punto intermedio de la ruta como ubicacion estimada del fallo
+    if affected_route:
+        mid_idx = len(affected_route) // 2
+        fault_coords = affected_route[mid_idx]
+    else:
+        fault_coords = [(box.splitter.latitude + box.latitude) / 2,
+                        (box.splitter.longitude + box.longitude) / 2]
+
+    # Generar instrucciones paso a paso
+    instructions = _generate_recommended_action(box, affected_segment_data, affected_clients, severity)
+
+    # Clientes afectados serializados
+    clients_data = ClientListSerializer(affected_clients, many=True).data
+
+    return Response({
+        'severity': severity,
+        'confidence': confidence,
+        'affected_segment': segment_json,
+        'power_analysis': {
+            'expected_dbm': expected_dbm,
+            'measured_dbm': measured_dbm,
+            'loss_db': loss_db,
+            'status': power_status,
+        },
+        'fault_location': {
+            'description': _build_fault_description(box, affected_segment_data),
+            'coordinates': fault_coords,
+            'address': box.address,
+        },
+        'recommended_action': instructions,
+        'affected_clients': clients_data,
+        'affected_route': affected_route,
+        'affected_count': affected_count,
+        'total_affected_in_splitter': total_affected_in_splitter,
+        'boxes_affected_in_splitter': len(boxes_with_issues),
+    })
+
+
+def _build_fault_description(box, segment):
+    """Construye una descripcion textual del fallo para el tecnico."""
+    if segment:
+        return (
+            f"Tramo {segment.get_segment_type_display()} "
+            f"del cable {segment.cable.code} "
+            f"(fibras #{segment.fiber_numbers}, {segment.length_m}m) "
+            f"entre {box.splitter.code} y la caja {box.code}"
+        )
+    return f"Posible fallo entre splitter {box.splitter.code} y caja {box.code}"
+
+
+def _generate_recommended_action(box, segment, affected_clients, severity):
+    """Genera instrucciones paso a paso detalladas para el tecnico de campo."""
+    lines = []
+
+    # Paso 1: Ir a la caja
+    lines.append(f"1. Ir a la caja {box.code} ({box.address}).")
+
+    # Paso 2: Medir potencia en la caja
+    lines.append("2. Medir potencia con power meter en el conector de entrada de la caja.")
+
+    # Paso 3: Verificar splitter
+    lines.append(
+        f"3. Si hay potencia en la caja: ir al splitter {box.splitter.code} "
+        f"y medir salida del puerto {box.splitter_port}."
+    )
+
+    # Paso 4: Verificar cable
+    if segment:
+        lines.append(
+            f"4. Si el splitter tiene potencia pero la caja no: revisar cable "
+            f"{segment.cable.code} fibra #{segment.fiber_numbers} entre ambos puntos "
+            f"({segment.length_m}m)."
+        )
+    else:
+        lines.append(
+            f"4. Si el splitter tiene potencia pero la caja no: revisar el cable "
+            f"entre {box.splitter.code} y {box.code}."
+        )
+
+    # Paso 5: Buscar rotura visual
+    if segment and segment.route_as_list:
+        lines.append(
+            f"5. Buscar rotura visual en trayectoria: desde {box.splitter.address} "
+            f"hasta {box.address}."
+        )
+    else:
+        lines.append(
+            f"5. Buscar rotura visual en el trayecto desde el splitter "
+            f"hasta la caja {box.code}."
+        )
+
+    # Recomendacion adicional segun severidad
+    if severity == 'critical':
+        lines.append(
+            "\n[ALERTA CRITICA] Multiples cajas afectadas en el mismo splitter. "
+            "Priorizar revision del splitter y cable de distribucion."
+        )
+    elif severity == 'high':
+        lines.append(
+            "\n[ALTA] Multiples clientes afectados. Probable fallo en el tramo "
+            "splitter->caja o conectores de la caja."
+        )
+
+    return "\n".join(lines)
+
+
+@api_view(['GET'])
+@permission_classes([permissions.IsAuthenticated])
+def topology_view(request):
+    """
+    Devuelve la topologia completa de la red FTTH para un diagrama.
+
+    Salida:
+    {
+        "olt": {...},
+        "zones": [
+            {
+                "zone": {...},
+                "splice": {...},
+                "splitter": {...},
+                "feeder_segments": [...],
+                "distribution_segments": [...],
+                "drop_segments": [...],
+                "boxes": [...],
+                "clients_count": 27
+            }
+        ]
+    }
+    """
+    # Obtener OLT (singleton)
+    olt = OLT.objects.filter(is_active=True).first()
+    olt_data = OLTSerializer(olt).data if olt else None
+
+    # Construir topologia por zonas
+    zones = Zone.objects.filter(is_active=True).select_related()
+    zones_data = []
+
+    for zone in zones:
+        # Empalmes de la zona
+        splices = SpliceClosure.objects.filter(zone=zone, is_active=True)
+        splice_data = SpliceClosureSerializer(splices, many=True).data
+
+        # Splitters de la zona
+        splitters = Splitter.objects.filter(zone=zone, is_active=True).select_related('olt')
+        splitter_data = SplitterSerializer(splitters, many=True).data
+
+        # Tramos feeder relacionados con esta zona
+        feeder_segments = CableSegment.objects.filter(
+            segment_type='olt_to_splice',
+            to_splice__zone=zone,
+            is_active=True
+        ).select_related('cable')
+        feeder_data = CableSegmentSerializer(feeder_segments, many=True).data
+
+        # Tramos distribution (splice -> splitter)
+        distribution_segments = CableSegment.objects.filter(
+            segment_type='splice_to_splitter',
+            to_splitter__zone=zone,
+            is_active=True
+        ).select_related('cable')
+        distribution_data = CableSegmentSerializer(distribution_segments, many=True).data
+
+        # Tramos splitter -> caja
+        splitter_to_box_segments = CableSegment.objects.filter(
+            segment_type='splitter_to_box',
+            to_box__zone=zone,
+            is_active=True
+        ).select_related('cable')
+        splitter_box_data = CableSegmentSerializer(splitter_to_box_segments, many=True).data
+
+        # Tramos caja -> cliente
+        box_to_client_segments = CableSegment.objects.filter(
+            segment_type='box_to_client',
+            from_box__zone=zone,
+            is_active=True
+        ).select_related('cable')
+        drop_data = CableSegmentSerializer(box_to_client_segments, many=True).data
+
+        # Cajas de la zona
+        boxes = FiberBox.objects.filter(zone=zone, is_active=True).select_related('splitter')
+        boxes_data = FiberBoxSerializer(boxes, many=True).data
+
+        # Contar clientes
+        clients_count = Client.objects.filter(box__zone=zone, is_active=True).count()
+
+        zones_data.append({
+            'zone': ZoneSerializer(zone).data,
+            'splices': splice_data,
+            'splitters': splitter_data,
+            'feeder_segments': feeder_data,
+            'distribution_segments': distribution_data,
+            'splitter_to_box_segments': splitter_box_data,
+            'drop_segments': drop_data,
+            'boxes': boxes_data,
+            'clients_count': clients_count,
+        })
+
+    return Response({
+        'olt': olt_data,
+        'zones': zones_data,
+        'summary': {
+            'total_zones': zones.count(),
+            'total_clients': Client.objects.filter(is_active=True).count(),
+            'total_boxes': FiberBox.objects.filter(is_active=True).count(),
+            'total_splitters': Splitter.objects.filter(is_active=True).count(),
+            'total_cables': FiberCable.objects.filter(is_active=True).count(),
+            'total_segments': CableSegment.objects.filter(is_active=True).count(),
+        }
+    })
