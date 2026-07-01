@@ -1,0 +1,10 @@
+[build]
+builder = "nixpacks"
+buildCommand = "bash build.sh"
+
+[deploy]
+startCommand = "bash railway_entrypoint.sh"
+healthcheckPath = "/api/"
+healthcheckTimeout = 60
+restartPolicyType = "on_failure"
+restartPolicyMaxRetries = 3
