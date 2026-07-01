@@ -354,7 +354,7 @@ function DiagnoseV2() {
     setSc(function(p) { return p.includes(id) ? p.filter(function(x) { return x !== id; }) : p.concat([id]); });
   }
 
-  function reset() { setStep(1); setBc(''); setBox(null); setCl([]); setSc([]); setRes(null); setEr(''; }
+  function reset() { setStep(1); setBc(''); setBox(null); setCl([]); setSc([]); setRes(null); setEr(''); }
 
   var scn = '';
   var scl = '';
