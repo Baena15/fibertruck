@@ -120,7 +120,7 @@ function Dashboard() {
 
   if (loading) return ce('div', {className: 'p-8 text-center text-gray-500'}, ['Cargando datos de red...']);
 
-  function fb(type) { return cables.filter(function(x) { return x.cable_type === type; }); }
+  function fb(type) { return (cables || []).filter(function(x) { return x.cable_type === type; }); }
   function sf(list) { return list.reduce(function(s, x) { return s + (x.fiber_count || 0); }, 0); }
   function su(list) { return list.reduce(function(s, x) { return s + (x.fibers_used || 0); }, 0); }
 
@@ -183,7 +183,7 @@ function Dashboard() {
           ce('th', {className: 'px-4 py-2 text-center'}, ['Clientes']),
           ce('th', {className: 'px-4 py-2 text-center'}, ['Afectados'])
         ])]),
-        ce('tbody', {className: 'divide-y divide-gray-50'}, zones.map(function(z) {
+        ce('tbody', {className: 'divide-y divide-gray-50'}, (zones || []).map(function(z) {
           return ce('tr', {key: z.id, className: 'hover:bg-gray-50'}, [
             ce('td', {className: 'px-4 py-2 flex items-center gap-2'}, [
               ce('div', {className: 'w-3 h-3 rounded-full', style: {background: ZC[z.code] || '#666'}}),
@@ -299,7 +299,7 @@ function NetworkMap() {
   ];
 
   return ce('div', {className: 'max-w-7xl mx-auto px-4 py-4'}, [
-    ce('div', {className: 'flex flex-wrap gap-2 mb-3'}, layerBtns.map(function(item) {
+    ce('div', {className: 'flex flex-wrap gap-2 mb-3'}, (layerBtns || []).map(function(item) {
       var k = item[0], l = item[1], c = item[2];
       return ce('button', {
         key: k,
@@ -377,7 +377,7 @@ function DiagnoseV2() {
     stepContent = ce('div', {className: 'bg-white rounded-xl shadow-sm border p-6'}, [
       ce('h2', {className: 'font-bold mb-1'}, [box.code + ' - ' + box.name]),
       ce('p', {className: 'text-xs text-gray-500 mb-4'}, [box.full_path || '']),
-      ce('div', {className: 'space-y-2 max-h-80 overflow-y-auto mb-4 border rounded-lg p-2'}, cl.map(function(c) {
+      ce('div', {className: 'space-y-2 max-h-80 overflow-y-auto mb-4 border rounded-lg p-2'}, (cl || []).map(function(c) {
         var selected = sc.includes(c.id);
         return ce('div', {
           key: c.id,
@@ -438,7 +438,7 @@ function DiagnoseV2() {
       ]) : null,
       res.affected_clients && res.affected_clients.length > 0 ? ce('div', {className: 'bg-white rounded-xl shadow-sm border p-4'}, [
         ce('h3', {className: 'font-bold mb-2'}, ['CLIENTES AFECTADOS (' + res.affected_clients.length + ')']),
-        ce('div', {className: 'space-y-1'}, res.affected_clients.map(function(c, i) {
+        ce('div', {className: 'space-y-1'}, (res.affected_clients || []).map(function(c, i) {
           return ce('div', {key: i, className: 'flex justify-between p-2 bg-red-50 rounded text-sm'}, [
             ce('span', null, [(c.client_code || c.code) + ' - ' + (c.full_name || c.name)]),
             ce('span', {className: 'font-mono text-red-600'}, [(c.power_dbm || c.optical_power_rx || '-') + ' dBm'])
@@ -453,10 +453,9 @@ function DiagnoseV2() {
     ce('div', {className: 'flex items-center mb-6 gap-2'}, [
       ce('div', {className: 'w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold ' + (step > 1 ? 'bg-green-500 text-white' : step === 1 ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-500')}, [step > 1 ? '✓' : '1']),
       ce('span', {className: 'text-xs hidden md:inline'}, ['Caja']),
-      ce('div', {className: 'flex-1 h-1 ' + (step > 1 ? 'bg-green-500' : 'bg-gray-200')}),
-      ce('div', {className: 'w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold ' + (step > 2 ? 'bg-green-500 text-white' : step === 2 ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-500')}, [step > 2 ? '✓' : '2']),
+      ce('div', {className: 'flex-1 h-1 ' + (step > 1 ? 'bg-green-500' : 'bg-gray-200')})), ce('div', {className: 'w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold ' + (step > 2 ? 'bg-green-500 text-white' : step === 2 ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-500')}, [step > 2 ? '✓' : '2']),
       ce('span', {className: 'text-xs hidden md:inline'}, ['Afectados']),
-      ce('div', {className: 'flex-1 h-1 ' + (step > 2 ? 'bg-green-500' : 'bg-gray-200')}),
+      ce('div', {className: 'flex-1 h-1 ' + (step > 2 ? 'bg-green-500' : 'bg-gray-200')})),
       ce('div', {className: 'w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold ' + (step === 3 ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-500')}, ['3']),
       ce('span', {className: 'text-xs hidden md:inline'}, ['Resultado'])
     ]),
@@ -493,7 +492,7 @@ function Topology() {
     })),
     ce('div', {className: 'bg-white rounded-xl shadow-sm border p-4'}, [
       ce('h2', {className: 'font-bold mb-3'}, ['Topologia: ' + (topo.olt && topo.olt.code || 'OLT') + ' (' + (topo.olt && topo.olt.output_power_dbm || '') + ' dBm)']),
-      ce('div', {className: 'space-y-2'}, zc.map(function(z) {
+      ce('div', {className: 'space-y-2'}, (zc || []).map(function(z) {
         var zone = z.zone || {};
         return ce('div', {key: zone.id, className: 'border rounded-lg p-3'}, [
           ce('div', {className: 'flex items-center gap-2 mb-2'}, [
@@ -562,7 +561,7 @@ function Simulate() {
     });
   }
 
-  var aff = boxes.filter(function(b) { return (b.affected_count || 0) > 0; });
+  var aff = (boxes || []).filter(function(b) { return (b.affected_count || 0) > 0; });
   var ta = aff.reduce(function(s, b) { return s + (b.affected_count || 0); }, 0);
 
   return ce('div', {className: 'max-w-4xl mx-auto px-4 py-6'}, [
@@ -578,7 +577,7 @@ function Simulate() {
         ]) :
         ce('div', {className: 'space-y-2'}, [
           ce('p', {className: 'text-sm font-semibold text-red-600'}, [ta + ' cliente(s) afectado(s) en ' + aff.length + ' caja(s):']),
-          aff.map(function(b) {
+          (aff || []).map(function(b) {
             return ce('div', {key: b.id, className: 'flex justify-between p-2 bg-red-50 border border-red-200 rounded'}, [
               ce('span', {className: 'font-mono font-bold text-red-800'}, [b.code]),
               ce('span', {className: 'bg-red-500 text-white px-2 py-0.5 rounded-full text-sm font-bold'}, [String(b.affected_count)])
