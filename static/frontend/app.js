@@ -453,7 +453,8 @@ function DiagnoseV2() {
     ce('div', {className: 'flex items-center mb-6 gap-2'}, [
       ce('div', {className: 'w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold ' + (step > 1 ? 'bg-green-500 text-white' : step === 1 ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-500')}, [step > 1 ? '✓' : '1']),
       ce('span', {className: 'text-xs hidden md:inline'}, ['Caja']),
-      ce('div', {className: 'flex-1 h-1 ' + (step > 1 ? 'bg-green-500' : 'bg-gray-200')})), ce('div', {className: 'w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold ' + (step > 2 ? 'bg-green-500 text-white' : step === 2 ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-500')}, [step > 2 ? '✓' : '2']),
+      ce('div', {className: 'flex-1 h-1 ' + (step > 1 ? 'bg-green-500' : 'bg-gray-200')}),
+      ce('div', {className: 'w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold ' + (step > 2 ? 'bg-green-500 text-white' : step === 2 ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-500')}, [step > 2 ? '✓' : '2']),
       ce('span', {className: 'text-xs hidden md:inline'}, ['Afectados']),
       ce('div', {className: 'flex-1 h-1 ' + (step > 2 ? 'bg-green-500' : 'bg-gray-200')}),
       ce('div', {className: 'w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold ' + (step === 3 ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-500')}, ['3']),
