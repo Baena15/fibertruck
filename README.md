@@ -35,7 +35,7 @@ Las coordenadas GPS de cada elemento se han asignado de forma coherente con el p
 | **Backend** | Django 5 + DRF | Framework requerido por el master. API REST con algoritmo de diagnostico |
 | **Frontend** | React 18 + Tailwind | Framework requerido. Interfaz responsive con mapa interactivo |
 | **Mapas** | Leaflet + OpenStreetMap | Open-source, visualizacion geoespacial de red FTTH |
-| **Base de datos** | SQLite (dev) / PostgreSQL (prod) | SQLite para desarrollo, PostgreSQL en Railway |
+| **Base de datos** | SQLite (dev) / PostgreSQL (prod) | SQLite para desarrollo, PostgreSQL en produccion |
 | **Auth** | JWT (SimpleJWT) | Tokens seguros con expiracion, 3 roles de usuario |
 
 ---
@@ -55,10 +55,10 @@ fibertruck/
 │   └── src/
 │       └── app.jsx      # Dashboard, Mapa, Diagnostico, Simulador
 ├── manage.py
-├── requirements.txt     # Detectado por Railway
-├── Procfile            # Comando de inicio
-├── railway.toml        # Config Railway
-└── build.sh            # Build script
+├── requirements.txt
+├── Procfile
+├── build.sh
+└── README.md
 ```
 
 ---
@@ -138,15 +138,6 @@ Usuarios de prueba:
 - `admin` / `admin123`
 - `tecnico1` / `tecno123`
 - `supervisor1` / `super123`
-
----
-
-## Despliegue en Railway
-
-1. **Crear proyecto** en [railway.app](https://railway.app) → Deploy from GitHub repo
-2. **Añadir PostgreSQL**: New → Database → PostgreSQL
-3. **Variables**: `SECRET_KEY`, `DEBUG=False`
-4. Railway detecta `requirements.txt` + `Procfile` automaticamente
 
 ---
 
