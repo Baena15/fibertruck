@@ -11,10 +11,8 @@ urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/', include('core.urls')),
     path('api/', include('network.urls')),
-    # Serve frontend at root
-    path('', TemplateView.as_view(template_name='index.html'), name='frontend'),
+    path('', TemplateView.as_view(template_name='frontend/index.html'), name='frontend'),
 ]
 
-# Serve static files in development
 if settings.DEBUG:
     urlpatterns += static(settings.STATIC_URL, document_root=settings.STATIC_ROOT)
