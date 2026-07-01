@@ -3,14 +3,124 @@ FiberTruck API Views
 CRUD + Algoritmo de diagnostico LCA (Fault Locator)
 """
 from rest_framework import viewsets, status, permissions
-from rest_framework.decorators import action
+from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.response import Response
+from django.contrib.auth import get_user_model
 from core.views import IsAdmin, IsSupervisor, IsTechnician
 from .models import OLT, Zone, Splitter, FiberBox, Client, FiberIncident
 from .serializers import (
     OLTSerializer, ZoneSerializer, SplitterSerializer,
     FiberBoxSerializer, ClientSerializer, ClientListSerializer, FiberIncidentSerializer
 )
+
+
+User = get_user_model()
+
+
+@api_view(['POST'])
+@permission_classes([permissions.AllowAny])
+def setup_view(request):
+    """
+    Endpoint para inicializar la base de datos con el despliegue FTTH de Cieza.
+    Solo funciona cuando la base de datos esta vacia (seguridad).
+    Crea superusuario + ejecuta populate_cieza.
+    """
+    # Seguridad: solo funciona si no hay usuarios
+    if User.objects.filter(is_superuser=True).exists():
+        return Response({'error': 'Setup ya completado. Ya existen superusuarios.'}, status=403)
+
+    try:
+        # Crear superusuario
+        admin = User.objects.create_superuser(
+            username='admin', email='admin@fibertruck.local',
+            password='admin123', first_name='Administrador', role='admin'
+        )
+        # Crear usuarios de prueba
+        t1 = User.objects.create_user(
+            username='tecnico1', password='tecno123',
+            first_name='Tecnico', last_name='Campo', role='technician'
+        )
+        s1 = User.objects.create_user(
+            username='supervisor1', password='super123',
+            first_name='Supervisor', last_name='NOC', role='supervisor'
+        )
+
+        # Ejecutar populate (importar la logica del management command)
+        from .management.commands.populate_cieza import (
+            ZONES_DATA, OLT_DATA, SPLITTERS_DATA, BOXES_DATA,
+            FIRST_NAMES, LAST_NAMES
+        )
+        import random
+
+        olt, _ = OLT.objects.get_or_create(code=OLT_DATA['code'], defaults={
+            'name': OLT_DATA['name'], 'address': OLT_DATA['address'],
+            'latitude': OLT_DATA['lat'], 'longitude': OLT_DATA['lng'], 'max_ports': OLT_DATA['max_ports'],
+        })
+
+        zones_map = {}
+        for zd in ZONES_DATA:
+            zone, _ = Zone.objects.get_or_create(code=zd['code'], defaults={
+                'name': zd['name'], 'description': zd['description'],
+                'latitude': zd['lat'], 'longitude': zd['lng'], 'population_estimate': zd['population'],
+            })
+            zones_map[zd['code']] = zone
+
+        splitters_map = {}
+        for sd in SPLITTERS_DATA:
+            zone = zones_map[sd['zone_code']]
+            splitter, _ = Splitter.objects.get_or_create(code=sd['code'], defaults={
+                'name': sd['name'], 'ratio': sd['ratio'], 'olt': olt, 'zone': zone,
+                'input_port_olt': sd['port'], 'latitude': sd['lat'], 'longitude': sd['lng'],
+                'address': f"Cerca de {sd['name']}",
+            })
+            splitters_map[sd['code']] = splitter
+
+        boxes_map = {}
+        for bd in BOXES_DATA:
+            zone = zones_map[bd['zone']]
+            splitter = splitters_map[bd['splitter']]
+            box, _ = FiberBox.objects.get_or_create(code=bd['code'], defaults={
+                'name': bd['name'], 'box_type': 'CTO', 'splitter': splitter, 'zone': zone,
+                'splitter_port': bd['port'], 'max_capacity': 16,
+                'latitude': bd['lat'], 'longitude': bd['lng'], 'address': bd['address'],
+            })
+            boxes_map[bd['code']] = box
+
+        random.seed(42)
+        name_idx = 0
+        total_clients = 0
+        for box_code, box in boxes_map.items():
+            num_clients = random.randint(4, 7)
+            for port in range(1, num_clients + 1):
+                fn = FIRST_NAMES[name_idx % len(FIRST_NAMES)]
+                ln1 = LAST_NAMES[name_idx % len(LAST_NAMES)]
+                ln2 = LAST_NAMES[(name_idx + 1) % len(LAST_NAMES)]
+                Client.objects.get_or_create(client_code=f'CLI-{total_clients + 1:04d}', defaults={
+                    'full_name': f'{fn} {ln1} {ln2}', 'address': f'{box.address} (Piso {port})',
+                    'latitude': box.latitude + random.uniform(-0.0005, 0.0005),
+                    'longitude': box.longitude + random.uniform(-0.0005, 0.0005),
+                    'box': box, 'box_port': port, 'olt_port': box.splitter.input_port_olt,
+                    'status': 'active', 'optical_power_rx': round(random.uniform(-15.0, -24.0), 1),
+                    'optical_power_tx': round(random.uniform(0.5, 4.0), 1),
+                })
+                name_idx += 1
+                total_clients += 1
+
+        return Response({
+            'success': True,
+            'message': 'FiberTruck inicializado correctamente',
+            'users_created': [
+                {'username': 'admin', 'password': 'admin123', 'role': 'admin'},
+                {'username': 'tecnico1', 'password': 'tecno123', 'role': 'technician'},
+                {'username': 'supervisor1', 'password': 'super123', 'role': 'supervisor'},
+            ],
+            'deployment': {
+                'olt': 1, 'zones': len(zones_map), 'splitters': len(splitters_map),
+                'boxes': len(boxes_map), 'clients': total_clients,
+            }
+        })
+    except Exception as e:
+        return Response({'error': str(e)}, status=500)
 
 
 class OLTViewSet(viewsets.ModelViewSet):
