@@ -1,75 +1,53 @@
 const { useState, useEffect } = React;
-const API_URL = window.location.hostname === 'localhost'
-  ? 'http://localhost:8000/api' : '/api';
+
+/* ============================================================
+   1. HELPERS GLOBALES
+   ============================================================ */
+
+const API_URL = '';
 
 const ZONE_COLORS = {
-  'Z-ERA': '#e74c3c', 'Z-SJOR': '#f39c12',
-  'Z-SJOA': '#3498db', 'Z-SJBO': '#2ecc71', 'Z-HORT': '#9b59b6'
+  'Z-ERA': '#dc2626',
+  'Z-SJOR': '#2563eb',
+  'Z-SJOA': '#16a34a',
+  'Z-SJBO': '#f59e0b',
+  'Z-HORT': '#8b5cf6'
 };
 
 const CABLE_COLORS = {
   feeder: '#dc2626',
   distribution: '#2563eb',
-  drop: '#16a34a',
-  fault: '#f59e0b'
+  drop: '#16a34a'
 };
 
-const SEVERITY_STYLES = {
-  critical: { bg: 'bg-red-100', text: 'text-red-800',
-    border: 'border-red-400', badge: 'bg-red-600' },
-  high: { bg: 'bg-orange-100', text: 'text-orange-800',
-    border: 'border-orange-400', badge: 'bg-orange-500' },
-  medium: { bg: 'bg-yellow-100', text: 'text-yellow-800',
-    border: 'border-yellow-400', badge: 'bg-yellow-500' },
-  low: { bg: 'bg-blue-100', text: 'text-blue-800',
-    border: 'border-blue-400', badge: 'bg-blue-500' }
+const getToken = () => localStorage.getItem('token');
+
+const apiHeaders = () => ({
+  'Authorization': 'Bearer ' + getToken(),
+  'Content-Type': 'application/json'
+});
+
+const fetchAPI = async (path) => {
+  const r = await fetch(API_URL + path, { headers: apiHeaders() });
+  return r.ok ? r.json() : null;
 };
 
-const getToken = () => localStorage.getItem('ft_token');
-
-const getUser = () => {
-  try { return JSON.parse(localStorage.getItem('ft_user')); }
-  catch { return null; }
-};
-
-const apiHeaders = () => {
-  const t = getToken();
-  const h = { 'Content-Type': 'application/json' };
-  if (t) h['Authorization'] = `Bearer ${t}`;
-  return h;
+const postAPI = async (path, body) => {
+  const r = await fetch(API_URL + path, {
+    method: 'POST',
+    headers: apiHeaders(),
+    body: JSON.stringify(body)
+  });
+  return r.ok ? r.json() : null;
 };
 
 const logout = () => {
-  localStorage.removeItem('ft_token');
-  localStorage.removeItem('ft_refresh');
-  localStorage.removeItem('ft_user');
+  localStorage.removeItem('token');
   window.location.reload();
 };
 
-const fetchAPI = async (endpoint) => {
-  try {
-    const r = await fetch(`${API_URL}${endpoint}`,
-      { headers: apiHeaders() });
-    if (r.status === 401) { logout(); return null; }
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    return await r.json();
-  } catch (e) { console.error(e); return null; }
-};
-
-const postAPI = async (endpoint, body) => {
-  try {
-    const r = await fetch(`${API_URL}${endpoint}`, {
-      method: 'POST', headers: apiHeaders(),
-      body: JSON.stringify(body)
-    });
-    if (r.status === 401) { logout(); return null; }
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    return await r.json();
-  } catch (e) { console.error(e); return null; }
-};
-
 /* ============================================================
-   LOGIN SCREEN
+   2. LOGIN SCREEN
    ============================================================ */
 
 function LoginScreen({ onLogin }) {
@@ -83,82 +61,71 @@ function LoginScreen({ onLogin }) {
     setLoading(true);
     setError('');
     try {
-      const r = await fetch(`${API_URL}/auth/login/`, {
+      const r = await fetch(API_URL + '/api/auth/login/', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, password })
       });
       const d = await r.json();
       if (r.ok && d.access) {
-        localStorage.setItem('ft_token', d.access);
-        localStorage.setItem('ft_refresh', d.refresh);
-        const m = await fetch(`${API_URL}/auth/me/`, {
-          headers: { 'Authorization': `Bearer ${d.access}` }
-        });
-        if (m.ok) {
-          localStorage.setItem('ft_user', JSON.stringify(await m.json()));
-        }
+        localStorage.setItem('token', d.access);
         onLogin();
       } else {
         setError(d.detail || 'Usuario o contrasena incorrectos');
       }
-    } catch { setError('Error de conexion'); }
+    } catch {
+      setError('Error de conexion');
+    }
     setLoading(false);
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-800
-      to-blue-900 flex items-center justify-center px-4">
+    <div className="min-h-screen bg-gradient-to-br from-blue-800 to-blue-900 flex items-center justify-center px-4">
       <div className="bg-white rounded-2xl shadow-2xl p-8 w-full max-w-md">
         <div className="text-center mb-6">
           <span className="text-4xl">&#128667;</span>
-          <h1 className="text-2xl font-bold text-gray-800 mt-2">
-            FiberTruck
-          </h1>
-          <p className="text-gray-500 text-sm">
-            Diagnostico FTTH - Cieza, Murcia
-          </p>
+          <h1 className="text-2xl font-bold text-gray-800 mt-2">FiberTruck</h1>
+          <p className="text-gray-500 text-sm">Diagnostico FTTH - Cieza, Murcia</p>
           <p className="text-xs text-blue-500 mt-1">v2.0</p>
         </div>
         <form onSubmit={handleLogin} className="space-y-4">
-          <input type="text" value={username}
+          <input
+            type="text" value={username}
             onChange={e => setUsername(e.target.value)}
             placeholder="Usuario"
-            className="w-full px-4 py-2 border border-gray-300 rounded-lg
-              focus:ring-2 focus:ring-blue-500 focus:outline-none"
-            required />
-          <input type="password" value={password}
+            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none"
+            required
+          />
+          <input
+            type="password" value={password}
             onChange={e => setPassword(e.target.value)}
             placeholder="Contrasena"
-            className="w-full px-4 py-2 border border-gray-300 rounded-lg
-              focus:ring-2 focus:ring-blue-500 focus:outline-none"
-            required />
+            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none"
+            required
+          />
           {error && (
-            <p className="text-red-600 text-sm bg-red-50 p-2 rounded">
-              &#9888; {error}
-            </p>
+            <p className="text-red-600 text-sm bg-red-50 p-2 rounded">&#9888; {error}</p>
           )}
-          <button type="submit" disabled={loading}
-            className="w-full py-2 bg-blue-600 text-white rounded-lg
-              font-semibold hover:bg-blue-700 disabled:opacity-50">
+          <button
+            type="submit" disabled={loading}
+            className="w-full py-2 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 disabled:opacity-50"
+          >
             {loading ? 'Entrando...' : 'Entrar'}
           </button>
         </form>
         <div className="mt-4 p-3 bg-gray-50 rounded-lg">
-          <p className="text-xs text-gray-500 mb-2 font-semibold">
-            Usuarios de prueba:
-          </p>
+          <p className="text-xs text-gray-500 mb-2 font-semibold">Usuarios de prueba:</p>
           <div className="grid grid-cols-3 gap-2">
-            { [
-                ['admin','admin123'],
-                ['tecnico1','tecno123'],
-                ['supervisor1','super123']
-              ].map(([u, p]) => (
-              <button key={u}
+            {[
+              ['admin', 'admin123'],
+              ['tecnico1', 'tecno123'],
+              ['supervisor1', 'super123']
+            ].map(([u, p]) => (
+              <button
+                key={u}
                 onClick={() => { setUsername(u); setPassword(p); }}
-                className="text-xs bg-white border border-gray-200
-                  rounded px-2 py-1 hover:border-blue-400
-                  hover:text-blue-700">
+                className="text-xs bg-white border border-gray-200 rounded px-2 py-1 hover:border-blue-400 hover:text-blue-700"
+              >
                 {u}
               </button>
             ))}
@@ -170,31 +137,17 @@ function LoginScreen({ onLogin }) {
 }
 
 /* ============================================================
-   HEADER
+   3. HEADER
    ============================================================ */
 
 function Header({ activeTab, setActiveTab }) {
-  const user = getUser();
-  const roleLabels = {
-    admin: 'Admin',
-    technician: 'Tecnico',
-    supervisor: 'Supervisor'
-  };
   const tabs = [
-    { id: 'dashboard', label: 'Dashboard', icon: '\uD83D\uDCCA',
-      roles: ['admin', 'technician', 'supervisor'] },
-    { id: 'map', label: 'Mapa', icon: '\uD83D\uDDFA',
-      roles: ['admin', 'technician', 'supervisor'] },
-    { id: 'topology', label: 'Red', icon: '\uD83C\uDF10',
-      roles: ['admin', 'technician', 'supervisor'] },
-    { id: 'diagnose', label: 'Diagnostico', icon: '\uD83D\uDD0D',
-      roles: ['admin', 'technician', 'supervisor'] },
-    { id: 'simulate', label: 'Simular', icon: '\u26A1',
-      roles: ['admin', 'supervisor'] },
+    { id: 'dashboard', label: 'Dashboard', icon: '\uD83D\uDCCA' },
+    { id: 'map', label: 'Mapa', icon: '\uD83D\uDDFA' },
+    { id: 'topology', label: 'Red', icon: '\uD83C\uDF10' },
+    { id: 'diagnose', label: 'Diagnostico', icon: '\uD83D\uDD0D' },
+    { id: 'simulate', label: 'Simular', icon: '\u26A1' },
   ];
-  const visibleTabs = tabs.filter(t =>
-    !user?.role || t.roles.includes(user.role)
-  );
 
   return (
     <header className="bg-blue-800 text-white shadow-lg">
@@ -208,27 +161,22 @@ function Header({ activeTab, setActiveTab }) {
             </div>
           </div>
           <nav className="flex space-x-1 flex-wrap">
-            {visibleTabs.map(t => (
-              <button key={t.id}
+            {tabs.map(t => (
+              <button
+                key={t.id}
                 onClick={() => setActiveTab(t.id)}
-                className={`px-3 py-2 rounded-lg text-sm font-medium
-                  transition-colors ${activeTab === t.id
+                className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                  activeTab === t.id
                     ? 'bg-blue-600 text-white'
-                    : 'text-blue-200 hover:bg-blue-700 hover:text-white'}`}>
+                    : 'text-blue-200 hover:bg-blue-700 hover:text-white'
+                }`}
+              >
                 {t.icon} {t.label}
               </button>
             ))}
           </nav>
           <div className="flex items-center space-x-3">
-            <span className="text-xs bg-blue-700 px-2 py-1 rounded-full">
-              {roleLabels[user?.role] || ''}
-            </span>
-            <span className="text-sm font-medium">
-              {user?.first_name || user?.username}
-            </span>
-            <button onClick={logout}
-              className="text-xs text-blue-300 hover:text-white"
-              title="Cerrar sesion">
+            <button onClick={logout} className="text-xs text-blue-300 hover:text-white" title="Cerrar sesion">
               Salir
             </button>
           </div>
@@ -239,279 +187,202 @@ function Header({ activeTab, setActiveTab }) {
 }
 
 /* ============================================================
-   DASHBOARD
+   4. DASHBOARD
    ============================================================ */
 
 function Dashboard() {
   const [stats, setStats] = useState(null);
   const [zones, setZones] = useState([]);
   const [cables, setCables] = useState([]);
+  const [olts, setOlts] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const load = async () => {
-      const [s, z, c] = await Promise.all([
-        fetchAPI('/incidents/stats/'),
-        fetchAPI('/zones/'),
-        fetchAPI('/cables/')
+      const [s, z, c, o] = await Promise.all([
+        fetchAPI('/api/incidents/stats/'),
+        fetchAPI('/api/zones/'),
+        fetchAPI('/api/cables/'),
+        fetchAPI('/api/olts/')
       ]);
       setStats(s);
-      setZones(z?.results || z || []);
-      setCables(c?.results || c || []);
+      setZones(z || []);
+      setCables(c || []);
+      setOlts(o || []);
       setLoading(false);
     };
     load();
-    const iv = setInterval(load, 10000);
-    return () => clearInterval(iv);
   }, []);
 
   if (loading) {
-    return (
-      <div className="p-8 text-center text-gray-500">
-        Cargando dashboard...
-      </div>
-    );
+    return <div className="p-8 text-center text-gray-500">Cargando dashboard...</div>;
   }
 
-  const totalFibers = cables.reduce((sum, c) =>
-    sum + (c.fiber_count || 0), 0);
-  const totalLength = cables.reduce((sum, c) =>
-    sum + (parseFloat(c.length_m) || 0), 0);
+  const olt = olts[0] || { output_power_dbm: '+3.0', splitter_ratio: '1x32' };
+  const zoneCount = zones.length;
+  const boxCount = stats?.active_boxes || 29;
+  const clientCount = stats?.total_clients || 161;
 
   const feederCables = cables.filter(c => c.cable_type === 'feeder');
   const distCables = cables.filter(c => c.cable_type === 'distribution');
   const dropCables = cables.filter(c => c.cable_type === 'drop');
 
+  const sumFibers = (list) => list.reduce((s, c) => s + (c.fiber_count || 0), 0);
+  const sumUsed = (list) => list.reduce((s, c) => s + (c.fibers_used || c.used_fibers || 0), 0);
+
+  const feederFibers = sumFibers(feederCables);
+  const distFibers = sumFibers(distCables);
+  const dropFibers = sumFibers(dropCables);
+
+  const feederUsed = sumUsed(feederCables);
+  const distUsed = sumUsed(distCables);
+  const dropUsed = sumUsed(dropCables);
+
+  const feederFree = feederFibers - feederUsed;
+  const distFree = distFibers - distUsed;
+  const dropFree = dropFibers - dropUsed;
+
+  const feederPct = feederFibers > 0 ? ((feederUsed / feederFibers) * 100).toFixed(1) : '0.0';
+  const distPct = distFibers > 0 ? ((distUsed / distFibers) * 100).toFixed(1) : '0.0';
+  const dropPct = dropFibers > 0 ? ((dropUsed / dropFibers) * 100).toFixed(1) : '0.0';
+
   return (
     <div className="max-w-7xl mx-auto px-4 py-6 space-y-6">
+      {/* FIBERTRUCK DASHBOARD Title */}
+      <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+        <h1 className="text-2xl font-bold text-center text-gray-800 tracking-wide">FIBERTRUCK DASHBOARD</h1>
+      </div>
+
       {/* Stats Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
-        { [
-          { l: 'OLTs', v: stats?.olt_count || 1,
-            c: 'bg-blue-500', i: '\uD83D\uDCE1' },
-          { l: 'Zonas', v: stats?.zone_count || 5,
-            c: 'bg-purple-500', i: '\uD83C\uDFD8' },
-          { l: 'Cajas CTO', v: stats?.active_boxes || 29,
-            c: 'bg-blue-500', i: '\uD83D\uDCE6' },
-          { l: 'Clientes', v: stats?.total_clients || 161,
-            c: 'bg-green-500', i: '\uD83D\uDC65' },
-          { l: 'Afectados',
-            v: stats?.affected_clients || 0,
-            c: stats?.affected_clients > 0
-              ? 'bg-red-500' : 'bg-green-500',
-            i: '\u26A0' },
-          { l: 'Incidencias',
-            v: stats?.open_incidents || 0,
-            c: 'bg-orange-500', i: '\uD83D\uDEA8' },
-        ].map((s, i) => (
-          <div key={i}
-            className="bg-white rounded-xl shadow-sm p-4
-              border border-gray-100">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-2xl">{s.i}</span>
-              <span className={`text-xs font-bold text-white px-2
-                py-0.5 rounded-full ${s.c}`}>
-                {s.l}
-              </span>
-            </div>
-            <p className="text-3xl font-bold text-gray-800">{s.v}</p>
-          </div>
-        ))}
-      </div>
-
-      {/* Cables Section */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2 bg-white rounded-xl shadow-sm
-          border border-gray-100 overflow-hidden">
-          <div className="px-6 py-4 border-b border-gray-100">
-            <h2 className="text-lg font-bold text-gray-800">
-              &#128225; Cables de Red
-            </h2>
-            <p className="text-xs text-gray-500">
-              {cables.length} cables &bull; {totalFibers} fibras
-              &bull; {(totalLength / 1000).toFixed(1)} km total
-            </p>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-gray-50 text-gray-600">
-                <tr>
-                  <th className="px-4 py-2 text-left">Codigo</th>
-                  <th className="px-4 py-2 text-left">Tipo</th>
-                  <th className="px-4 py-2 text-center">Fibras</th>
-                  <th className="px-4 py-2 text-center">Long.(m)</th>
-                  <th className="px-4 py-2 text-center">Usadas</th>
-                  <th className="px-4 py-2 text-center">Util.</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-50">
-                {cables.map(c => {
-                  const used = c.used_fibers || 0;
-                  const total = c.fiber_count || 0;
-                  const pct = total > 0 ? Math.round((used / total) * 100) : 0;
-                  const barColor = pct > 80 ? 'bg-red-500'
-                    : pct > 50 ? 'bg-yellow-500' : 'bg-green-500';
-                  const typeLabel = c.cable_type === 'feeder' ? 'Feeder'
-                    : c.cable_type === 'distribution' ? 'Distribution'
-                    : 'Drop';
-                  const typeColor = c.cable_type === 'feeder'
-                    ? 'text-red-600 bg-red-50'
-                    : c.cable_type === 'distribution'
-                    ? 'text-blue-600 bg-blue-50'
-                    : 'text-green-600 bg-green-50';
-                  return (
-                    <tr key={c.id} className="hover:bg-gray-50">
-                      <td className="px-4 py-2 font-mono font-semibold
-                        text-gray-800">
-                        {c.code}
-                      </td>
-                      <td className="px-4 py-2">
-                        <span className={`text-xs px-2 py-0.5 rounded-full
-                          font-medium ${typeColor}`}>
-                          {typeLabel}
-                        </span>
-                      </td>
-                      <td className="px-4 py-2 text-center">{total}</td>
-                      <td className="px-4 py-2 text-center">
-                        {c.length_m}
-                      </td>
-                      <td className="px-4 py-2 text-center">
-                        {used}/{total}
-                      </td>
-                      <td className="px-4 py-2 text-center">
-                        <div className="flex items-center gap-2">
-                          <div className="flex-1 bg-gray-200 rounded-full
-                            h-2 max-w-[60px]">
-                            <div className={`h-2 rounded-full ${barColor}`}
-                              style={{width: `${pct}%`}} />
-                          </div>
-                          <span className="text-xs font-medium">{pct}%</span>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-                {cables.length === 0 && (
-                  <tr>
-                    <td colSpan="6"
-                      className="px-4 py-8 text-center text-gray-400">
-                      No hay cables registrados
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-100 text-center">
+          <p className="text-sm text-gray-500 mb-1">OLT</p>
+          <p className="text-3xl font-bold text-blue-700">{olt.code || 'OLT-01'}</p>
+          <p className="text-lg font-semibold text-blue-600 mt-1">{olt.output_power_dbm || '+3.0'} dBm</p>
         </div>
-
-        {/* Cable Type Summary */}
-        <div className="bg-white rounded-xl shadow-sm border border-gray-100
-          overflow-hidden">
-          <div className="px-6 py-4 border-b border-gray-100">
-            <h2 className="text-lg font-bold text-gray-800">
-              &#128202; Resumen por Tipo
-            </h2>
-          </div>
-          <div className="p-4 space-y-3">
-            { [
-                { type: 'feeder', label: 'Feeder (OLT)', color: '#dc2626',
-                  list: feederCables },
-                { type: 'distribution', label: 'Distribution',
-                  color: '#2563eb', list: distCables },
-                { type: 'drop', label: 'Drop (ultima milla)',
-                  color: '#16a34a', list: dropCables },
-              ].map(({ type, label, color, list }) => {
-              const fibers = list.reduce((s, c) =>
-                s + (c.fiber_count || 0), 0);
-              const used = list.reduce((s, c) =>
-                s + (c.used_fibers || 0), 0);
-              const len = list.reduce((s, c) =>
-                s + (parseFloat(c.length_m) || 0), 0);
-              const pct = fibers > 0 ? Math.round((used / fibers) * 100) : 0;
-              return (
-                <div key={type} className="p-3 rounded-lg border"
-                  style={{borderColor: color + '30',
-                    backgroundColor: color + '08'}}>
-                  <div className="flex items-center gap-2 mb-2">
-                    <div className="w-3 h-3 rounded-full"
-                      style={{backgroundColor: color}} />
-                    <span className="font-semibold text-sm text-gray-800">
-                      {label}
-                    </span>
-                  </div>
-                  <div className="grid grid-cols-3 gap-2 text-center">
-                    <div>
-                      <p className="text-lg font-bold"
-                        style={{color}}>{list.length}</p>
-                      <p className="text-xs text-gray-500">cables</p>
-                    </div>
-                    <div>
-                      <p className="text-lg font-bold"
-                        style={{color}}>{fibers}</p>
-                      <p className="text-xs text-gray-500">fibras</p>
-                    </div>
-                    <div>
-                      <p className="text-lg font-bold"
-                        style={{color}}>{(len/1000).toFixed(1)}km</p>
-                      <p className="text-xs text-gray-500">longitud</p>
-                    </div>
-                  </div>
-                  <div className="mt-2">
-                    <div className="flex justify-between text-xs mb-1">
-                      <span>Utilizacion</span>
-                      <span>{pct}%</span>
-                    </div>
-                    <div className="bg-gray-200 rounded-full h-2">
-                      <div className="h-2 rounded-full transition-all"
-                        style={{width: `${pct}%`, backgroundColor: color}} />
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+        <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-100 text-center">
+          <p className="text-sm text-gray-500 mb-1">Zonas</p>
+          <p className="text-3xl font-bold text-purple-700">{zoneCount}</p>
+          <p className="text-sm text-gray-400 mt-1">barrios</p>
+        </div>
+        <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-100 text-center">
+          <p className="text-sm text-gray-500 mb-1">Cajas CTO</p>
+          <p className="text-3xl font-bold text-blue-700">{boxCount}</p>
+          <p className="text-sm text-gray-400 mt-1">activas</p>
+        </div>
+        <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-100 text-center">
+          <p className="text-sm text-gray-500 mb-1">Clientes</p>
+          <p className="text-3xl font-bold text-green-700">{clientCount}</p>
+          <p className="text-sm text-gray-400 mt-1">totales</p>
         </div>
       </div>
 
-      {/* Zones */}
-      <div className="bg-white rounded-xl shadow-sm border border-gray-100
-        overflow-hidden">
+      {/* CABLES DE RED */}
+      <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
         <div className="px-6 py-4 border-b border-gray-100">
-          <h2 className="text-lg font-bold text-gray-800">
-            &#127968; Zonas de Despliegue (Barrios de Cieza)
-          </h2>
+          <h2 className="text-lg font-bold text-gray-800">&#128225; CABLES DE RED</h2>
         </div>
-        <div className="divide-y divide-gray-50">
-          {zones.map(z => (
-            <div key={z.id}
-              className="px-6 py-4 flex items-center justify-between
-                hover:bg-gray-50">
-              <div className="flex items-center gap-3">
-                <div className="w-4 h-4 rounded-full"
-                  style={{backgroundColor: ZONE_COLORS[z.code] || '#666'}} />
-                <span className="text-sm font-mono text-gray-500 mr-2">
-                  {z.code}
-                </span>
-                <span className="font-semibold text-gray-800">
-                  {z.name}
-                </span>
-              </div>
-              <div className="flex items-center space-x-6 text-sm">
-                <span className="text-gray-500">
-                  &#128101; {z.population_estimate?.toLocaleString()} hab.
-                </span>
-                <span className="text-blue-600 font-semibold">
-                  {z.client_count} clientes
-                </span>
-                {z.affected_client_count > 0 && (
-                  <span className="text-red-600 font-bold bg-red-50 px-2
-                    py-0.5 rounded-full">
-                    &#9888; {z.affected_client_count}
-                  </span>
-                )}
-              </div>
-            </div>
-          ))}
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-gray-50 text-gray-600">
+              <tr>
+                <th className="px-4 py-3 text-left">Tipo</th>
+                <th className="px-4 py-3 text-center">Capacidad</th>
+                <th className="px-4 py-3 text-center">Usadas</th>
+                <th className="px-4 py-3 text-center">Libres</th>
+                <th className="px-4 py-3 text-center">Uso</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-50">
+              <tr className="hover:bg-gray-50">
+                <td className="px-4 py-3 font-semibold text-red-700">Feeder</td>
+                <td className="px-4 py-3 text-center font-mono">{feederFibers}f ({feederCables.length})</td>
+                <td className="px-4 py-3 text-center">{feederUsed}</td>
+                <td className="px-4 py-3 text-center">{feederFree}</td>
+                <td className="px-4 py-3 text-center">
+                  <div className="flex items-center gap-2 justify-center">
+                    <div className="power-bar-bg w-24">
+                      <div className="power-bar-fill bg-red-500" style={{ width: feederPct + '%' }} />
+                    </div>
+                    <span className="text-xs font-medium w-12">{feederPct}%</span>
+                  </div>
+                </td>
+              </tr>
+              <tr className="hover:bg-gray-50">
+                <td className="px-4 py-3 font-semibold text-blue-700">Distribution</td>
+                <td className="px-4 py-3 text-center font-mono">{distFibers}f ({distCables.length})</td>
+                <td className="px-4 py-3 text-center">{distUsed}</td>
+                <td className="px-4 py-3 text-center">{distFree}</td>
+                <td className="px-4 py-3 text-center">
+                  <div className="flex items-center gap-2 justify-center">
+                    <div className="power-bar-bg w-24">
+                      <div className="power-bar-fill bg-blue-500" style={{ width: distPct + '%' }} />
+                    </div>
+                    <span className="text-xs font-medium w-12">{distPct}%</span>
+                  </div>
+                </td>
+              </tr>
+              <tr className="hover:bg-gray-50">
+                <td className="px-4 py-3 font-semibold text-green-700">Drop</td>
+                <td className="px-4 py-3 text-center font-mono">{dropFibers}f ({dropCables.length})</td>
+                <td className="px-4 py-3 text-center">{dropUsed}</td>
+                <td className="px-4 py-3 text-center">{dropFree}</td>
+                <td className="px-4 py-3 text-center">
+                  <div className="flex items-center gap-2 justify-center">
+                    <div className="power-bar-bg w-24">
+                      <div className="power-bar-fill bg-green-500" style={{ width: dropPct + '%' }} />
+                    </div>
+                    <span className="text-xs font-medium w-12">{dropPct}%</span>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* ESTADO DE LA RED */}
+      <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+        <div className="px-6 py-4 border-b border-gray-100">
+          <h2 className="text-lg font-bold text-gray-800">&#127968; ESTADO DE LA RED</h2>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-gray-50 text-gray-600">
+              <tr>
+                <th className="px-4 py-3 text-left">Zona</th>
+                <th className="px-4 py-3 text-center">Clientes</th>
+                <th className="px-4 py-3 text-center">Afectados</th>
+                <th className="px-4 py-3 text-left">Empalmes</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-50">
+              {zones.map(z => (
+                <tr key={z.id} className="hover:bg-gray-50">
+                  <td className="px-4 py-3">
+                    <div className="flex items-center gap-2">
+                      <div className="w-3 h-3 rounded-full" style={{ backgroundColor: ZONE_COLORS[z.code] || '#666' }} />
+                      <span className="font-semibold text-gray-800">{z.name}</span>
+                      <span className="text-xs text-gray-400 font-mono">({z.code})</span>
+                    </div>
+                  </td>
+                  <td className="px-4 py-3 text-center font-semibold">{z.client_count || 0}</td>
+                  <td className="px-4 py-3 text-center">
+                    {(z.affected_client_count || 0) > 0 ? (
+                      <span className="bg-red-100 text-red-700 px-2 py-0.5 rounded-full font-bold text-xs">
+                        {z.affected_client_count}
+                      </span>
+                    ) : (
+                      <span className="text-green-600">0</span>
+                    )}
+                  </td>
+                  <td className="px-4 py-3 font-mono text-xs text-gray-600">
+                    SPC-{z.code?.replace('Z-', '') || ''}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       </div>
     </div>
@@ -519,23 +390,21 @@ function Dashboard() {
 }
 
 /* ============================================================
-   NETWORK MAP (replaces FiberMap)
+   5. NETWORK MAP
    ============================================================ */
 
 function NetworkMap() {
+  const [segments, setSegments] = useState([]);
   const [boxes, setBoxes] = useState([]);
-  const [zones, setZones] = useState([]);
-  const [cables, setCables] = useState([]);
   const [splices, setSplices] = useState([]);
   const [splitters, setSplitters] = useState([]);
-  const [segments, setSegments] = useState([]);
-  const [selectedBox, setSelectedBox] = useState(null);
-  const [boxClients, setBoxClients] = useState([]);
-  const [selectedCable, setSelectedCable] = useState(null);
-  const [selectedSplice, setSelectedSplice] = useState(null);
+  const [zones, setZones] = useState([]);
+  const [olts, setOlts] = useState([]);
+  const [selectedElement, setSelectedElement] = useState(null);
+  const [selectedBoxClients, setSelectedBoxClients] = useState([]);
   const [showLayer, setShowLayer] = useState({
     feeder: true, distribution: true, drop: true,
-    boxes: true, splices: true, splitters: true
+    boxes: true, splices: true, splitters: true, olt: true
   });
   const [loading, setLoading] = useState(true);
 
@@ -543,37 +412,36 @@ function NetworkMap() {
   const leafletMap = React.useRef(null);
   const layersRef = React.useRef({});
 
-  // Load data
+  // Load all data
   useEffect(() => {
     const load = async () => {
-      const [b, z, c, sp, spl, seg] = await Promise.all([
-        fetchAPI('/boxes/'),
-        fetchAPI('/zones/'),
-        fetchAPI('/cables/'),
-        fetchAPI('/splices/'),
-        fetchAPI('/splitters/'),
-        fetchAPI('/segments/')
+      const [seg, b, sp, spl, z, o] = await Promise.all([
+        fetchAPI('/api/segments/'),
+        fetchAPI('/api/boxes/'),
+        fetchAPI('/api/splices/'),
+        fetchAPI('/api/splitters/'),
+        fetchAPI('/api/zones/'),
+        fetchAPI('/api/olts/')
       ]);
-      setBoxes(b?.results || b || []);
-      setZones(z?.results || z || []);
-      setCables(c?.results || c || []);
-      setSplices(sp?.results || sp || []);
-      setSplitters(spl?.results || spl || []);
-      setSegments(seg?.results || seg || []);
+      setSegments(seg || []);
+      setBoxes(b || []);
+      setSplices(sp || []);
+      setSplitters(spl || []);
+      setZones(z || []);
+      setOlts(o || []);
       setLoading(false);
     };
     load();
   }, []);
 
-  // Initialize map
+  // Initialize Leaflet map
   useEffect(() => {
     if (!leafletMap.current && mapRef.current) {
-      leafletMap.current = L.map(mapRef.current)
-        .setView([38.2395, -1.4165], 15);
-      L.tileLayer(
-        'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
-        { attribution: '&copy; OpenStreetMap', maxZoom: 19 }
-      ).addTo(leafletMap.current);
+      leafletMap.current = L.map(mapRef.current).setView([38.2395, -1.4165], 15);
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; OpenStreetMap',
+        maxZoom: 19
+      }).addTo(leafletMap.current);
     }
     return () => {
       if (leafletMap.current) {
@@ -583,7 +451,7 @@ function NetworkMap() {
     };
   }, []);
 
-  // Draw all layers
+  // Draw all layers on map
   useEffect(() => {
     if (!leafletMap.current || loading) return;
 
@@ -602,375 +470,297 @@ function NetworkMap() {
       boxes: L.layerGroup(),
       splices: L.layerGroup(),
       splitters: L.layerGroup(),
-      zones: L.layerGroup()
+      olt: L.layerGroup()
     };
 
-    // Draw zone circles
+    // Draw OLT
+    if (showLayer.olt && olts.length > 0) {
+      const olt = olts[0];
+      if (olt.latitude && olt.longitude) {
+        const oltIcon = L.divIcon({
+          className: 'custom-olt-marker',
+          html: `<div style="width:20px;height:20px;background:#dc2626;border:2px solid #fff;box-shadow:0 0 4px rgba(0,0,0,0.5);"></div>`,
+          iconSize: [20, 20],
+          iconAnchor: [10, 10]
+        });
+        L.marker([olt.latitude, olt.longitude], { icon: oltIcon })
+          .addTo(layerGroups.olt)
+          .bindPopup(`<b>${olt.code || 'OLT'}</b><br/>${olt.name || ''}<br/>Potencia: ${olt.output_power_dbm || '?'} dBm<br/>Ratio: ${olt.splitter_ratio || '?'}`);
+      }
+    }
+
+    // Draw zone areas
     zones.forEach(z => {
-      const color = ZONE_COLORS[z.code] || '#666';
-      L.circle([z.latitude, z.longitude], {
-        radius: 350, color, fillColor: color,
-        fillOpacity: 0.06, weight: 2, dashArray: '5,5'
-      }).addTo(layerGroups.zones)
-        .bindPopup(`<b>${z.name}</b><br/>${z.code}<br/>
-          ${z.client_count} clientes`);
+      if (z.latitude && z.longitude) {
+        const color = ZONE_COLORS[z.code] || '#666';
+        L.circle([z.latitude, z.longitude], {
+          radius: 400, color, fillColor: color,
+          fillOpacity: 0.05, weight: 2, dashArray: '5,5'
+        }).addTo(layerGroups.feeder)
+          .bindPopup(`<b>${z.name}</b><br/>${z.code}<br/>${z.client_count || 0} clientes`);
+      }
     });
 
     // Draw cable segments as polylines
     segments.forEach(seg => {
-      const cable = cables.find(c => c.id === seg.cable) || {};
-      const cType = cable.cable_type || 'drop';
-      if (!showLayer[cType]) return;
+      const sType = seg.segment_type || seg.cable_type || 'drop';
+      if (!showLayer[sType]) return;
 
-      const route = seg.route_as_list || seg.route || [];
+      const route = seg.route_as_list || [];
       if (route.length < 2) return;
 
-      const color = cType === 'feeder' ? CABLE_COLORS.feeder
-        : cType === 'distribution' ? CABLE_COLORS.distribution
-        : CABLE_COLORS.drop;
-      const weight = cType === 'feeder' ? 4
-        : cType === 'distribution' ? 3 : 2;
-      const dash = cType === 'feeder' ? '10,5'
-        : cType === 'drop' ? '5,5' : null;
+      const color = CABLE_COLORS[sType] || '#666';
+      const weight = sType === 'feeder' ? 4 : sType === 'distribution' ? 3 : 2;
+      const dashArray = sType === 'feeder' ? '10,5' : sType === 'drop' ? '5,5' : null;
 
-      const poly = L.polyline(route, {
-        color, weight,
-        dashArray: dash,
-        opacity: 0.85
-      }).addTo(layerGroups[cType]);
+      const poly = L.polyline(route, { color, weight, dashArray, opacity: 0.85 })
+        .addTo(layerGroups[sType]);
 
-      const usedFibers = cable.used_fibers || 0;
-      const totalFibers = cable.fiber_count || 0;
       const popupContent = `
         <div style="min-width:180px">
-          <b style="color:${color}">${cable.code || 'Tramo ' + seg.id}</b><br/>
-          <small>Tipo: <b>${cType.toUpperCase()}</b></small><br/>
-          <small>Cable: ${cable.code || 'N/A'}</small><br/>
-          <small>Fibras: ${usedFibers}/${totalFibers}</small><br/>
-          <small>Longitud: ${seg.length_m || cable.length_m || '?'}m</small>
+          <b style="color:${color}">${seg.cable_code || 'Tramo ' + seg.id}</b><br/>
+          <small>Tipo: <b>${sType.toUpperCase()}</b></small><br/>
+          <small>Origen: ${seg.origin_name || '?'}</small><br/>
+          <small>Destino: ${seg.destination_name || '?'}</small><br/>
+          <small>Fibras: ${seg.fiber_numbers || '?'}</small><br/>
+          <small>Longitud: ${seg.length_m || '?'}m</small><br/>
+          <small>Atenuacion: ${seg.attenuation_db || '?'} dB</small>
         </div>
       `;
       poly.bindPopup(popupContent);
-      poly.on('click', () => {
-        setSelectedCable({...cable, segment: seg});
-        setSelectedSplice(null);
-      });
+      poly.on('click', () => setSelectedElement({ type: 'segment', data: seg }));
     });
 
     // Draw splices (empalmes)
     if (showLayer.splices) {
       splices.forEach(sp => {
         if (!sp.latitude || !sp.longitude) return;
-        const usedFibers = sp.used_fibers || 0;
-        const totalFibers = sp.fiber_capacity || 0;
-        const freeFibers = totalFibers - usedFibers;
-
         const marker = L.circleMarker([sp.latitude, sp.longitude], {
-          radius: 10, fillColor: '#1f2937',
+          radius: 8, fillColor: '#111827',
           color: '#fbbf24', weight: 3, fillOpacity: 0.9
         }).addTo(layerGroups.splices)
           .bindPopup(`
             <div style="min-width:160px">
               <b>${sp.code || sp.name}</b><br/>
-              <small>Tipo: ${sp.splice_type || 'Fusion'}</small><br/>
-              <small>Fibras: ${totalFibers}</small><br/>
-              <small style="color:green">Libres: ${freeFibers}</small><br/>
-              <small style="color:red">Usadas: ${usedFibers}</small>
+              <small>Tipo: ${sp.closure_type || 'Fusion'}</small><br/>
+              <small>Zona: ${sp.zone_name || sp.zone_code || 'N/A'}</small><br/>
+              <small>Fibras: ${sp.fiber_count_used || 0}/${sp.fiber_capacity || 0}</small><br/>
+              <small style="color:green">Libres: ${sp.fibers_free || 0}</small>
             </div>
           `);
-        marker.on('click', () => {
-          setSelectedSplice(sp);
-          setSelectedCable(null);
-        });
+        marker.on('click', () => setSelectedElement({ type: 'splice', data: sp }));
       });
     }
 
-    // Draw splitters
+    // Draw splitters (estrella naranja)
     if (showLayer.splitters) {
       splitters.forEach(spl => {
         if (!spl.latitude || !spl.longitude) return;
-        const color = spl.splitter_type === 'zone_root'
-          ? '#dc2626' : '#f97316';
-        const radius = spl.splitter_type === 'zone_root' ? 12 : 9;
-
-        const marker = L.circleMarker(
-          [spl.latitude, spl.longitude], {
-            radius, fillColor: color,
-            color: '#fff', weight: 2, fillOpacity: 0.9
-          }).addTo(layerGroups.splitters)
-            .bindPopup(`
-              <div style="min-width:160px">
-                <b style="color:${color}">${spl.code || spl.name}</b><br/>
-                <small>Tipo: ${spl.splitter_type_display || spl.splitter_type}</small><br/>
-                <small>Ratio: 1:${spl.ratio || '?'}</small><br/>
-                <small>Zona: ${spl.zone_name || 'N/A'}</small>
-              </div>
-            `);
-        marker.on('click', () => setSelectedSplice(null));
+        const starIcon = L.divIcon({
+          className: 'custom-splitter-icon',
+          html: `<svg width="20" height="20" viewBox="0 0 24 24" fill="#f97316" stroke="#fff" stroke-width="1"><polygon points="12,2 15,9 22,9 16,14 18,22 12,17 6,22 8,14 2,9 9,9"/></svg>`,
+          iconSize: [20, 20],
+          iconAnchor: [10, 10]
+        });
+        L.marker([spl.latitude, spl.longitude], { icon: starIcon })
+          .addTo(layerGroups.splitters)
+          .bindPopup(`
+            <div style="min-width:160px">
+              <b style="color:#f97316">${spl.code || spl.name}</b><br/>
+              <small>Ratio: 1:${spl.ratio || '?'}</small><br/>
+              <small>Zona: ${spl.zone_code || 'N/A'}</small><br/>
+              <small>Puertos: ${spl.occupied_ports || 0}/${spl.total_ports || 0} ocupados</small><br/>
+              <small>Potencia entrada: ${spl.output_power_dbm || '?'} dBm</small>
+            </div>
+          `)
+          .on('click', () => setSelectedElement({ type: 'splitter', data: spl }));
       });
     }
 
-    // Draw boxes (CTOs)
+    // Draw boxes (CTOs) - circulo con color de zona
     if (showLayer.boxes) {
       boxes.forEach(b => {
-        const color = b.status === 'fault' ? '#dc2626'
-          : (ZONE_COLORS[b.zone_code || b.zone] || '#0ea5e9');
-        const isAffected = b.affected_count > 0;
+        if (!b.latitude || !b.longitude) return;
+        const color = ZONE_COLORS[b.zone_code] || '#0ea5e9';
+        const isAffected = (b.affected_count || 0) > 0;
 
         L.circleMarker([b.latitude, b.longitude], {
-          radius: isAffected ? 14 : 10,
+          radius: isAffected ? 12 : 8,
           fillColor: color,
           color: isAffected ? '#dc2626' : '#fff',
           weight: isAffected ? 3 : 2,
-          fillOpacity: isAffected ? 0.9 : 0.7
+          fillOpacity: isAffected ? 0.95 : 0.75
         }).addTo(layerGroups.boxes)
           .bindPopup(`
             <b>${b.code}</b><br/>
-            ${b.name}<br/>
-            ${b.client_count} clientes
-            ${isAffected
-              ? `<br/><span style="color:red">${b.affected_count} afectados</span>`
-              : ''}
+            ${b.name || ''}<br/>
+            ${b.client_count || 0} clientes
+            ${isAffected ? `<br/><span style="color:red; font-weight:bold;">${b.affected_count} afectados</span>` : ''}
           `)
           .on('click', async () => {
-            setSelectedBox(b);
-            setSelectedCable(null);
-            setSelectedSplice(null);
-            const c = await fetchAPI(`/boxes/${b.id}/clients/`);
-            setBoxClients(c || []);
+            setSelectedElement({ type: 'box', data: b });
+            const c = await fetchAPI('/api/boxes/' + b.id + '/clients/');
+            setSelectedBoxClients(c || []);
           });
       });
     }
 
-    // Add all layer groups to map
+    // Add all layer groups to map based on visibility
     Object.entries(layerGroups).forEach(([key, group]) => {
-      if (key === 'zones' || showLayer[key] !== false) {
+      if (showLayer[key] !== false) {
         group.addTo(leafletMap.current);
       }
       layersRef.current[key] = group;
     });
-  }, [boxes, zones, cables, splices, splitters, segments,
-      showLayer, loading]);
+  }, [segments, boxes, splices, splitters, zones, olts, showLayer, loading]);
 
   const toggleLayer = (layer) => {
-    setShowLayer(p => ({...p, [layer]: !p[layer]}));
+    setShowLayer(p => ({ ...p, [layer]: !p[layer] }));
   };
 
   if (loading) {
-    return (
-      <div className="p-8 text-center text-gray-500">
-        Cargando mapa de red...
-      </div>
-    );
+    return <div className="p-8 text-center text-gray-500">Cargando mapa...</div>;
   }
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-6">
       {/* Layer controls */}
       <div className="mb-4 flex flex-wrap gap-2">
-        { [
-          { k: 'feeder', l: 'Feeder', c: 'bg-red-100 text-red-700' },
-          { k: 'distribution', l: 'Distribution',
-            c: 'bg-blue-100 text-blue-700' },
-          { k: 'drop', l: 'Drop', c: 'bg-green-100 text-green-700' },
-          { k: 'boxes', l: 'Cajas CTO', c: 'bg-gray-100 text-gray-700' },
-          { k: 'splices', l: 'Empalmes',
-            c: 'bg-yellow-100 text-yellow-700' },
-          { k: 'splitters', l: 'Splitters',
-            c: 'bg-orange-100 text-orange-700' },
+        {[
+          { k: 'feeder', l: 'Feeder', c: 'bg-red-100 text-red-700 border-red-300' },
+          { k: 'distribution', l: 'Distribution', c: 'bg-blue-100 text-blue-700 border-blue-300' },
+          { k: 'drop', l: 'Drop', c: 'bg-green-100 text-green-700 border-green-300' },
+          { k: 'boxes', l: 'Cajas CTO', c: 'bg-gray-100 text-gray-700 border-gray-300' },
+          { k: 'splices', l: 'Empalmes', c: 'bg-yellow-100 text-yellow-700 border-yellow-300' },
+          { k: 'splitters', l: 'Splitters', c: 'bg-orange-100 text-orange-700 border-orange-300' },
+          { k: 'olt', l: 'OLT', c: 'bg-red-100 text-red-800 border-red-400' },
         ].map(item => (
-          <button key={item.k}
+          <button
+            key={item.k}
             onClick={() => toggleLayer(item.k)}
-            className={`px-3 py-1.5 rounded-lg text-xs font-medium
-              border transition-all ${showLayer[item.k]
-                ? item.c + ' border-current'
-                : 'bg-gray-50 text-gray-400 border-gray-200'}`}>
+            className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-all ${
+              showLayer[item.k] ? item.c : 'bg-gray-50 text-gray-400 border-gray-200'
+            }`}
+          >
             {showLayer[item.k] ? '\u2713' : '\u2717'} {item.l}
           </button>
         ))}
-        <button onClick={() => {
-          if (leafletMap.current) {
-            leafletMap.current.setView([38.2395, -1.4165], 15);
-          }
-        }} className="px-3 py-1.5 rounded-lg text-xs font-medium
-          bg-gray-100 text-gray-600 border border-gray-200
-          hover:bg-gray-200 ml-auto">
+        <button
+          onClick={() => { if (leafletMap.current) leafletMap.current.setView([38.2395, -1.4165], 15); }}
+          className="px-3 py-1.5 rounded-lg text-xs font-medium bg-gray-100 text-gray-600 border border-gray-200 hover:bg-gray-200 ml-auto"
+        >
           Centrar
         </button>
       </div>
 
-      <div className="flex flex-col lg:flex-row gap-4" style={{height: '70vh'}}>
+      <div className="flex flex-col lg:flex-row gap-4" style={{ height: '75vh' }}>
         {/* Map */}
-        <div className="flex-1 bg-white rounded-xl shadow-sm
-          border border-gray-100 overflow-hidden relative">
-          <div ref={mapRef} style={{height: '100%', width: '100%'}} />
-          {/* Legend */}
-          <div className="absolute bottom-3 right-3 bg-white/90
-            backdrop-blur-sm rounded-lg shadow-md p-3 text-xs
-            border border-gray-200 z-[500]">
+        <div className="flex-1 bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden relative">
+          <div ref={mapRef} style={{ height: '100%', width: '100%' }} />
+          {/* Legend - esquina inferior derecha */}
+          <div className="absolute bottom-3 right-3 bg-white/90 backdrop-blur-sm rounded-lg shadow-md p-3 text-xs border border-gray-200 z-[500]">
             <p className="font-bold text-gray-700 mb-2">Leyenda</p>
             <div className="space-y-1.5">
               <div className="flex items-center gap-2">
-                <div className="w-6 rounded"
-                  style={{background: '#dc2626', height: '4px'}} />
-                <span>Feeder (OLT)</span>
+                <div className="w-6 rounded" style={{ background: '#dc2626', height: '4px', borderStyle: 'dashed', borderWidth: '1px', borderColor: '#dc2626' }} />
+                <span>Feeder</span>
               </div>
               <div className="flex items-center gap-2">
-                <div className="w-6 rounded"
-                  style={{background: '#2563eb', height: '3px'}} />
+                <div className="w-6 rounded" style={{ background: '#2563eb', height: '3px' }} />
                 <span>Distribution</span>
               </div>
               <div className="flex items-center gap-2">
-                <div className="w-6 rounded"
-                  style={{background: '#16a34a', height: '2px'}} />
+                <div className="w-6 rounded" style={{ background: '#16a34a', height: '2px', borderStyle: 'dashed', borderWidth: '1px', borderColor: '#16a34a' }} />
                 <span>Drop</span>
               </div>
               <div className="flex items-center gap-2">
-                <div className="w-3 h-3 rounded-full"
-                  style={{background: '#1f2937',
-                    border: '2px solid #fbbf24'}} />
+                <div className="w-3 h-3 rounded-full" style={{ background: '#1f2937', border: '2px solid #fbbf24' }} />
                 <span>Empalme</span>
               </div>
               <div className="flex items-center gap-2">
-                <div className="w-3 h-3 rounded-full"
-                  style={{background: '#f97316'}} />
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="#f97316"><polygon points="12,2 15,9 22,9 16,14 18,22 12,17 6,22 8,14 2,9 9,9"/></svg>
                 <span>Splitter</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-3 h-3 rounded-full" style={{ background: '#0ea5e9' }} />
+                <span>Caja CTO</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-3 h-3" style={{ background: '#dc2626', border: '1px solid #fff' }} />
+                <span>OLT</span>
               </div>
             </div>
           </div>
         </div>
 
         {/* Side Panel */}
-        <div className="w-full lg:w-96 bg-white rounded-xl shadow-sm
-          border border-gray-100 overflow-hidden flex flex-col">
+        <div className="w-full lg:w-80 bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden flex flex-col">
           <div className="px-4 py-3 border-b border-gray-100 bg-gray-50">
-            <h3 className="font-bold text-gray-800">
-              Elementos de Red
-            </h3>
-            <p className="text-xs text-gray-500">
-              {boxes.length} cajas &bull; {splices.length} empalmes
-              &bull; {splitters.length} splitters
-            </p>
+            <h3 className="font-bold text-gray-800">Elemento seleccionado</h3>
           </div>
-          <div className="flex-1 overflow-y-auto p-4 space-y-4">
-            {/* Selected Cable */}
-            {selectedCable && (
-              <div className="p-3 rounded-lg border border-blue-200
-                bg-blue-50">
-                <h4 className="font-bold text-blue-800 mb-2">
-                  {selectedCable.code}
-                </h4>
-                <p className="text-sm text-blue-700 capitalize">
-                  Tipo: {selectedCable.cable_type}
-                </p>
-                <p className="text-sm text-blue-700">
-                  Fibras: {selectedCable.used_fibers || 0}/
-                  {selectedCable.fiber_count || 0}
-                </p>
-                <p className="text-sm text-blue-700">
-                  Longitud: {selectedCable.length_m}m
-                </p>
-                {selectedCable.segments && (
-                  <p className="text-sm text-blue-700">
-                    Tramos: {selectedCable.segments.length}
-                  </p>
-                )}
-              </div>
-            )}
-            {/* Selected Splice */}
-            {selectedSplice && (
-              <div className="p-3 rounded-lg border border-yellow-200
-                bg-yellow-50">
-                <h4 className="font-bold text-yellow-800 mb-2">
-                  {selectedSplice.code || selectedSplice.name}
-                </h4>
-                <p className="text-sm text-yellow-700">
-                  Tipo: {selectedSplice.splice_type || 'Fusion'}
-                </p>
-                <p className="text-sm text-yellow-700">
-                  Fibras: {selectedSplice.fiber_capacity || 0}
-                </p>
-                <p className="text-sm text-yellow-700">
-                  Libres: {(selectedSplice.fiber_capacity || 0) -
-                    (selectedSplice.used_fibers || 0)}
-                </p>
-              </div>
-            )}
-            {/* Selected Box */}
-            {selectedBox && (
-              <div className="p-3 rounded-lg border border-gray-200
-                bg-gray-50">
-                <h4 className="font-bold text-gray-800 mb-2">
-                  {selectedBox.code}
-                </h4>
-                <p className="text-sm text-gray-600 mb-1">
-                  {selectedBox.name}
-                </p>
-                <p className="text-xs text-gray-400 mb-2">
-                  {selectedBox.full_path}
-                </p>
-                <p className="text-sm mb-2">
-                  {boxClients.length} clientes:
-                </p>
-                <div className="space-y-1 max-h-40 overflow-y-auto">
-                  {boxClients.map(c => (
-                    <div key={c.id}
-                      className={`text-xs px-2 py-1 rounded ${
-                        c.status === 'affected'
-                          ? 'bg-red-100 text-red-700'
-                          : 'bg-green-50 text-green-700'}`}>
-                      {c.client_code} - {c.full_name}
-                      {c.optical_power_rx
-                        && ` (${c.optical_power_rx} dBm)`}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-            {!selectedBox && !selectedCable && !selectedSplice && (
+          <div className="flex-1 overflow-y-auto p-4">
+            {!selectedElement && (
               <div className="text-center text-gray-400 py-8">
                 <p className="text-3xl mb-2">&#128506;</p>
-                <p className="text-sm">Haz clic en un elemento del mapa</p>
+                <p className="text-sm">Haz clic en un elemento</p>
                 <p className="text-xs">para ver sus detalles</p>
               </div>
             )}
-          </div>
-          {/* Boxes list */}
-          <div className="border-t border-gray-200 max-h-48 overflow-y-auto">
-            <div className="px-4 py-2 bg-gray-50 text-xs font-semibold
-              text-gray-600">
-              Cajas ({boxes.length})
-            </div>
-            {boxes.map(b => (
-              <div key={b.id}
-                className={`px-4 py-2 border-b border-gray-50
-                  cursor-pointer hover:bg-blue-50 transition-colors ${
-                  selectedBox?.id === b.id
-                    ? 'bg-blue-100 border-l-4 border-l-blue-500' : ''}`}
-                onClick={() => {
-                  setSelectedBox(b);
-                  if (leafletMap.current) {
-                    leafletMap.current.setView(
-                      [b.latitude, b.longitude], 17);
-                  }
-                  fetchAPI(`/boxes/${b.id}/clients/`)
-                    .then(c => setBoxClients(c || []));
-                }}>
-                <div className="flex items-center justify-between">
-                  <span className="font-mono text-sm font-bold
-                    text-blue-700">{b.code}</span>
-                  {b.affected_count > 0 && (
-                    <span className="text-xs bg-red-100 text-red-700
-                      px-1.5 py-0.5 rounded-full font-bold">
-                      {b.affected_count}
-                    </span>
+            {selectedElement?.type === 'segment' && (
+              <div className="p-3 rounded-lg border border-blue-200 bg-blue-50">
+                <h4 className="font-bold text-blue-800 mb-2">{selectedElement.data.cable_code || 'Tramo'}</h4>
+                <p className="text-sm text-blue-700">Tipo: <b>{selectedElement.data.segment_type || selectedElement.data.cable_type}</b></p>
+                <p className="text-sm text-blue-700">Origen: {selectedElement.data.origin_name || '?'}</p>
+                <p className="text-sm text-blue-700">Destino: {selectedElement.data.destination_name || '?'}</p>
+                <p className="text-sm text-blue-700">Fibras: {selectedElement.data.fiber_numbers || '?'}</p>
+                <p className="text-sm text-blue-700">Longitud: {selectedElement.data.length_m || '?'}m</p>
+              </div>
+            )}
+            {selectedElement?.type === 'splice' && (
+              <div className="p-3 rounded-lg border border-yellow-200 bg-yellow-50">
+                <h4 className="font-bold text-yellow-800 mb-2">{selectedElement.data.code || selectedElement.data.name}</h4>
+                <p className="text-sm text-yellow-700">Tipo: {selectedElement.data.closure_type || 'Fusion'}</p>
+                <p className="text-sm text-yellow-700">Zona: {selectedElement.data.zone_name || '?'}</p>
+                <p className="text-sm text-yellow-700">Fibras: {selectedElement.data.fiber_count_used || 0}/{selectedElement.data.fiber_capacity || 0}</p>
+                <p className="text-sm text-yellow-700">Direccion: {selectedElement.data.address || '?'}</p>
+              </div>
+            )}
+            {selectedElement?.type === 'splitter' && (
+              <div className="p-3 rounded-lg border border-orange-200 bg-orange-50">
+                <h4 className="font-bold text-orange-800 mb-2">{selectedElement.data.code || selectedElement.data.name}</h4>
+                <p className="text-sm text-orange-700">Ratio: 1:{selectedElement.data.ratio || '?'}</p>
+                <p className="text-sm text-orange-700">Zona: {selectedElement.data.zone_code || '?'}</p>
+                <p className="text-sm text-orange-700">Puertos: {selectedElement.data.occupied_ports || 0}/{selectedElement.data.total_ports || 0}</p>
+                <p className="text-sm text-orange-700">Potencia: {selectedElement.data.output_power_dbm || '?'} dBm</p>
+              </div>
+            )}
+            {selectedElement?.type === 'box' && (
+              <div className="space-y-3">
+                <div className="p-3 rounded-lg border border-gray-200 bg-gray-50">
+                  <h4 className="font-bold text-gray-800 mb-1">{selectedElement.data.code}</h4>
+                  <p className="text-sm text-gray-600">{selectedElement.data.name}</p>
+                  <p className="text-xs text-gray-400">{selectedElement.data.full_path}</p>
+                  <p className="text-sm mt-2">Potencia esperada: {selectedElement.data.expected_power_dbm || '?'} dBm</p>
+                  <p className="text-sm">Potencia medida: {selectedElement.data.measured_power_dbm || '?'} dBm</p>
+                  {selectedElement.data.power_deviation_db && (
+                    <p className={`text-sm font-semibold ${selectedElement.data.power_deviation_db > 5 ? 'text-red-600' : 'text-green-600'}`}>
+                      Desviacion: {selectedElement.data.power_deviation_db} dB
+                    </p>
                   )}
                 </div>
-                <p className="text-xs text-gray-500 truncate">
-                  {b.name}
-                </p>
+                <div>
+                  <p className="text-sm font-semibold text-gray-700 mb-2">Clientes ({selectedBoxClients.length}):</p>
+                  <div className="space-y-1 max-h-48 overflow-y-auto">
+                    {selectedBoxClients.map(c => (
+                      <div key={c.id} className={`text-xs px-2 py-1 rounded ${c.status === 'affected' ? 'bg-red-100 text-red-700' : 'bg-green-50 text-green-700'}`}>
+                        {c.client_code} - {c.full_name}
+                        {c.optical_power_rx && ` (${c.optical_power_rx} dBm)`}
+                      </div>
+                    ))}
+                  </div>
+                </div>
               </div>
-            ))}
+            )}
           </div>
         </div>
       </div>
@@ -979,7 +769,7 @@ function NetworkMap() {
 }
 
 /* ============================================================
-   DIAGNOSE V2
+   6. DIAGNOSE V2 - Wizard de 3 pasos
    ============================================================ */
 
 function DiagnoseV2() {
@@ -995,39 +785,43 @@ function DiagnoseV2() {
   const miniMapRef = React.useRef(null);
   const miniLeafletMap = React.useRef(null);
 
+  // Buscar caja por codigo
   const searchBox = async () => {
     setLoading(true);
     setError('');
-    try {
-      const data = await fetchAPI(
-        `/boxes/search/?code=${boxCode.toUpperCase()}`);
-      if (data && !data.error) {
-        setBox(data);
-        const c = await fetchAPI(`/boxes/${data.id}/clients/`);
+    const allBoxes = await fetchAPI('/api/boxes/');
+    if (allBoxes) {
+      const found = allBoxes.find(b => b.code.toUpperCase() === boxCode.toUpperCase());
+      if (found) {
+        setBox(found);
+        const c = await fetchAPI('/api/boxes/' + found.id + '/clients/');
         setClients(c || []);
         setStep(2);
       } else {
-        setError(data?.error || 'Caja no encontrada');
+        setError('Caja no encontrada: ' + boxCode);
       }
-    } catch {
-      setError('Error al buscar caja');
+    } else {
+      setError('Error al cargar cajas');
     }
     setLoading(false);
   };
 
+  // Ejecutar diagnostico
   const runDiagnosis = async () => {
     if (selectedClients.length === 0) {
-      setError('Selecciona al menos un cliente');
+      setError('Selecciona al menos un cliente afectado');
       return;
     }
     setLoading(true);
     setError('');
 
+    // Reportar outage para cada cliente
     for (const cid of selectedClients) {
-      await postAPI('/clients/report_outage/', { client_id: cid });
+      await postAPI('/api/clients/report_outage/', { client_id: cid });
     }
 
-    const diagnosis = await postAPI('/diagnose/v2/', {
+    // Llamar a diagnostico v2
+    const diagnosis = await postAPI('/api/diagnose/v2/', {
       box_code: boxCode.toUpperCase(),
       affected_client_ids: selectedClients
     });
@@ -1042,9 +836,7 @@ function DiagnoseV2() {
   };
 
   const toggleClient = (id) => {
-    setSelectedClients(p =>
-      p.includes(id) ? p.filter(x => x !== id) : [...p, id]
-    );
+    setSelectedClients(p => p.includes(id) ? p.filter(x => x !== id) : [...p, id]);
   };
 
   const reset = () => {
@@ -1055,118 +847,97 @@ function DiagnoseV2() {
     setSelectedClients([]);
     setResult(null);
     setError('');
+    if (miniLeafletMap.current) {
+      miniLeafletMap.current.remove();
+      miniLeafletMap.current = null;
+    }
   };
 
-  // Mini map for affected route
+  // Mini mapa para el tramo afectado
   useEffect(() => {
     if (step === 3 && result?.affected_route && miniMapRef.current) {
-      if (!miniLeafletMap.current) {
-        miniLeafletMap.current = L.map(miniMapRef.current);
-        L.tileLayer(
-          'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
-          { attribution: '&copy; OSM', maxZoom: 19 }
-        ).addTo(miniLeafletMap.current);
-      }
-      const route = result.affected_route;
-      if (route.length >= 2) {
-        miniLeafletMap.current.eachLayer(l => {
-          if (l instanceof L.Polyline && !(l instanceof L.TileLayer)) {
-            miniLeafletMap.current.removeLayer(l);
-          }
-        });
-        L.polyline(route, {
-          color: '#dc2626', weight: 5,
-          dashArray: '8,4', opacity: 0.9
-        }).addTo(miniLeafletMap.current);
-        L.circleMarker(route[0], {
-          radius: 6, fillColor: '#16a34a',
-          color: '#fff', weight: 2
-        }).addTo(miniLeafletMap.current)
-          .bindPopup('Origen');
-        L.circleMarker(route[route.length - 1], {
-          radius: 6, fillColor: '#dc2626',
-          color: '#fff', weight: 2
-        }).addTo(miniLeafletMap.current)
-          .bindPopup('Destino (caja)');
-        const bounds = L.latLngBounds(route);
-        miniLeafletMap.current.fitBounds(bounds.pad(0.3));
-      }
-    }
-    return () => {
       if (miniLeafletMap.current) {
         miniLeafletMap.current.remove();
         miniLeafletMap.current = null;
       }
-    };
+      miniLeafletMap.current = L.map(miniMapRef.current);
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; OSM',
+        maxZoom: 19
+      }).addTo(miniLeafletMap.current);
+
+      const route = result.affected_route;
+      if (route.length >= 2) {
+        L.polyline(route, { color: '#dc2626', weight: 5, dashArray: '8,4', opacity: 0.9 })
+          .addTo(miniLeafletMap.current);
+        L.circleMarker(route[0], { radius: 6, fillColor: '#16a34a', color: '#fff', weight: 2 })
+          .addTo(miniLeafletMap.current).bindPopup('Origen');
+        L.circleMarker(route[route.length - 1], { radius: 6, fillColor: '#dc2626', color: '#fff', weight: 2 })
+          .addTo(miniLeafletMap.current).bindPopup('Caja');
+        const bounds = L.latLngBounds(route);
+        miniLeafletMap.current.fitBounds(bounds.pad(0.3));
+      }
+    }
   }, [step, result]);
 
-  const sev = result?.severity || 'medium';
-  const sevStyle = SEVERITY_STYLES[sev] || SEVERITY_STYLES.medium;
+  const severityClass = result?.severity === 'critical' ? 'severity-critical'
+    : result?.severity === 'high' ? 'severity-high'
+    : result?.severity === 'medium' ? 'severity-medium'
+    : 'severity-low';
+
+  const severityTitle = result?.severity === 'critical' ? 'CRITICO'
+    : result?.severity === 'high' ? 'ALTO'
+    : result?.severity === 'medium' ? 'MEDIO'
+    : 'BAJO';
+
+  const severityEmoji = result?.severity === 'critical' ? '\uD83D\uDEA8'
+    : result?.severity === 'high' ? '\u26A0\uFE0F'
+    : '\u2139\uFE0F';
 
   return (
-    <div className="max-w-4xl mx-auto px-4 py-6">
+    <div className="max-w-5xl mx-auto px-4 py-6">
       {/* Wizard Steps */}
       <div className="flex items-center mb-8">
-        { ['Introducir Caja', 'Seleccionar Afectados',
-            'Resultado'].map((s, i) => (
+        {['Introducir Caja', 'Seleccionar Afectados', 'Resultado'].map((s, i) => (
           <React.Fragment key={i}>
-            <div className={`flex items-center justify-center w-10 h-10
-              rounded-full font-bold text-sm ${
+            <div className={`flex items-center justify-center w-10 h-10 rounded-full font-bold text-sm ${
               step > i + 1 ? 'bg-green-500 text-white'
               : step === i + 1 ? 'bg-blue-600 text-white'
-              : 'bg-gray-200 text-gray-500'}`}>
+              : 'bg-gray-200 text-gray-500'
+            }`}>
               {step > i + 1 ? '\u2713' : i + 1}
             </div>
-            {i < 2 && (
-              <div className={`flex-1 h-1 mx-2 ${
-                step > i + 1 ? 'bg-green-500' : 'bg-gray-200'}`} />
-            )}
+            <span className="text-xs ml-2 mr-2 hidden md:inline ${step >= i + 1 ? 'text-gray-800 font-medium' : 'text-gray-400'}">{s}</span>
+            {i < 2 && <div className={`flex-1 h-1 mx-2 ${step > i + 1 ? 'bg-green-500' : 'bg-gray-200'}`} />}
           </React.Fragment>
         ))}
       </div>
 
-      {/* Step 1: Enter Box Code */}
+      {/* PASO 1: Introducir codigo de caja */}
       {step === 1 && (
-        <div className="bg-white rounded-xl shadow-sm border
-          border-gray-100 p-8">
-          <h2 className="text-xl font-bold text-gray-800 mb-2">
-            Codigo de caja
-          </h2>
-          <p className="text-gray-500 mb-6">
-            Introduce el codigo de la caja a diagnosticar
-          </p>
+        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-8">
+          <h2 className="text-xl font-bold text-gray-800 mb-2">Codigo de caja</h2>
+          <p className="text-gray-500 mb-6">Introduce el codigo de la caja a diagnosticar (ej: CTO-023)</p>
           <div className="flex gap-3">
-            <input type="text" value={boxCode}
+            <input
+              type="text" value={boxCode}
               onChange={e => setBoxCode(e.target.value.toUpperCase())}
               onKeyPress={e => e.key === 'Enter' && searchBox()}
-              placeholder="Ej: CTO-023"
-              className="flex-1 px-4 py-3 border-2 border-gray-200
-                rounded-lg focus:border-blue-500 focus:outline-none
-                text-lg font-mono uppercase" />
-            <button onClick={searchBox}
-              disabled={loading || !boxCode}
-              className="px-6 py-3 bg-blue-600 text-white rounded-lg
-                font-semibold hover:bg-blue-700 disabled:opacity-50">
+              placeholder="CTO-023"
+              className="flex-1 px-4 py-3 border-2 border-gray-200 rounded-lg focus:border-blue-500 focus:outline-none text-lg font-mono uppercase"
+            />
+            <button onClick={searchBox} disabled={loading || !boxCode}
+              className="px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 disabled:opacity-50">
               {loading ? '...' : 'Buscar'}
             </button>
           </div>
-          {error && (
-            <p className="mt-3 text-red-600 text-sm bg-red-50 p-2
-              rounded">{error}</p>
-          )}
+          {error && <p className="mt-3 text-red-600 text-sm bg-red-50 p-2 rounded">{error}</p>}
           <div className="mt-8 p-4 bg-gray-50 rounded-lg">
-            <p className="text-sm font-semibold text-gray-600 mb-2">
-              Ejemplos:
-            </p>
+            <p className="text-sm font-semibold text-gray-600 mb-2">Ejemplos rapidos:</p>
             <div className="grid grid-cols-4 gap-2">
-              { ['CTO-001','CTO-010','CTO-020','CTO-023',
-                  'CTO-030','CTO-015','CTO-025','CTO-036'
-                ].map(c => (
-                <button key={c}
-                  onClick={() => setBoxCode(c)}
-                  className="text-xs font-mono bg-white border
-                    border-gray-200 rounded px-2 py-1
-                    hover:border-blue-400 hover:text-blue-700">
+              {['CTO-001','CTO-010','CTO-020','CTO-023','CTO-030','CTO-015','CTO-025','CTO-036'].map(c => (
+                <button key={c} onClick={() => { setBoxCode(c); }}
+                  className="text-xs font-mono bg-white border border-gray-200 rounded px-2 py-1 hover:border-blue-400 hover:text-blue-700">
                   {c}
                 </button>
               ))}
@@ -1175,48 +946,34 @@ function DiagnoseV2() {
         </div>
       )}
 
-      {/* Step 2: Select Affected Clients */}
+      {/* PASO 2: Seleccionar clientes afectados */}
       {step === 2 && box && (
-        <div className="bg-white rounded-xl shadow-sm border
-          border-gray-100 p-8">
+        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-8">
           <div className="mb-6">
-            <h2 className="text-xl font-bold text-gray-800">
-              {box.code} - {box.name}
-            </h2>
+            <h2 className="text-xl font-bold text-gray-800">{box.code} - {box.name}</h2>
             <p className="text-gray-500 text-sm">{box.full_path}</p>
+            <p className="text-gray-400 text-xs mt-1">{box.client_count} clientes registrados</p>
           </div>
-          <h3 className="font-semibold text-gray-700 mb-3">
-            Selecciona clientes afectados:
-          </h3>
-          <div className="space-y-2 mb-6 max-h-80 overflow-y-auto">
+          <h3 className="font-semibold text-gray-700 mb-3">Selecciona los clientes afectados:</h3>
+          <div className="space-y-2 mb-6 max-h-80 overflow-y-auto border border-gray-100 rounded-lg p-2">
             {clients.map(c => (
-              <div key={c.id}
-                onClick={() => toggleClient(c.id)}
-                className={`flex items-center p-3 rounded-lg border-2
-                  cursor-pointer transition-colors ${
-                  selectedClients.includes(c.id)
-                    ? 'border-red-400 bg-red-50'
-                    : 'border-gray-200 hover:border-blue-300'}`}>
-                <div className={`w-5 h-5 rounded border-2 mr-3 flex
-                  items-center justify-center ${
-                  selectedClients.includes(c.id)
-                    ? 'bg-red-500 border-red-500'
-                    : 'border-gray-300'}`}>
-                  {selectedClients.includes(c.id) && (
-                    <span className="text-white text-xs">\u2713</span>
-                  )}
+              <div key={c.id} onClick={() => toggleClient(c.id)}
+                className={`flex items-center p-3 rounded-lg border-2 cursor-pointer transition-colors ${
+                  selectedClients.includes(c.id) ? 'border-red-400 bg-red-50' : 'border-gray-200 hover:border-blue-300'
+                }`}>
+                <div className={`w-5 h-5 rounded border-2 mr-3 flex items-center justify-center ${
+                  selectedClients.includes(c.id) ? 'bg-red-500 border-red-500' : 'border-gray-300'
+                }`}>
+                  {selectedClients.includes(c.id) && <span className="text-white text-xs">\u2713</span>}
                 </div>
                 <div className="flex-1">
                   <p className="font-semibold text-sm">{c.full_name}</p>
-                  <p className="text-xs text-gray-500">
-                    {c.client_code} - {c.address}
-                  </p>
+                  <p className="text-xs text-gray-500">{c.client_code} - {c.address}</p>
                 </div>
                 {c.optical_power_rx && (
                   <span className={`text-xs font-mono px-2 py-1 rounded ${
-                    parseFloat(c.optical_power_rx) < -25
-                      ? 'bg-red-100 text-red-700'
-                      : 'bg-green-100 text-green-700'}`}>
+                    parseFloat(c.optical_power_rx) < -25 ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'
+                  }`}>
                     {c.optical_power_rx} dBm
                   </span>
                 )}
@@ -1225,221 +982,191 @@ function DiagnoseV2() {
           </div>
           <div className="flex gap-3">
             <button onClick={() => setStep(1)}
-              className="px-4 py-2 border border-gray-300 rounded-lg
-                hover:bg-gray-50">
+              className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 text-gray-700">
               Atras
             </button>
-            <button onClick={runDiagnosis}
-              disabled={loading}
-              className="flex-1 px-4 py-3 bg-blue-600 text-white
-                rounded-lg font-semibold hover:bg-blue-700
-                disabled:opacity-50">
-              {loading ? 'Analizando...'
-                : `Diagnosticar ${selectedClients.length} afectados`}
+            <button onClick={runDiagnosis} disabled={loading}
+              className="flex-1 px-4 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 disabled:opacity-50">
+              {loading ? 'Analizando red...' : `Diagnosticar ${selectedClients.length} cliente(s) afectado(s)`}
             </button>
           </div>
-          {error && (
-            <p className="mt-3 text-red-600 text-sm">{error}</p>
-          )}
+          {error && <p className="mt-3 text-red-600 text-sm">{error}</p>}
         </div>
       )}
 
-      {/* Step 3: Detailed Result */}
+      {/* PASO 3: RESULTADO DEL DIAGNOSTICO */}
       {step === 3 && result && (
         <div className="space-y-6">
-          {/* Severity Header */}
-          <div className={`rounded-xl shadow-sm border-2 p-6
-            ${sevStyle.bg} ${sevStyle.border}`}>
-            <div className="flex items-start justify-between">
+          {/* Header de severidad */}
+          <div className={`rounded-xl shadow-sm border p-6 ${severityClass}`}>
+            <div className="flex items-center justify-between">
               <div>
-                <h2 className={`text-xl font-bold mb-1 ${sevStyle.text}`}>
-                  {sev === 'critical' ? 'DIAGNOSTICO: CRITICO'
-                  : sev === 'high' ? 'DIAGNOSTICO: ALTO'
-                  : sev === 'medium'
-                    ? 'DIAGNOSTICO: MEDIO'
-                    : 'DIAGNOSTICO: BAJO'}
+                <h2 className="text-xl font-bold">
+                  {severityEmoji} DIAGNOSTICO: {severityTitle}
                 </h2>
-                <p className="text-sm opacity-70">
-                  Confianza: <strong>{result.confidence}%</strong>
+                <p className="text-sm mt-1 opacity-80">
+                  Confianza: <strong>{result.confidence || 0}%</strong>
                 </p>
               </div>
-              <div className={`px-4 py-1.5 rounded-full text-sm
-                font-bold text-white ${sevStyle.badge}`}>
-                {sev.toUpperCase()}
+              <div className={`px-4 py-2 rounded-full text-sm font-bold text-white ${
+                result.severity === 'critical' ? 'bg-red-600'
+                : result.severity === 'high' ? 'bg-orange-500'
+                : result.severity === 'medium' ? 'bg-blue-500'
+                : 'bg-green-500'
+              }`}>
+                {result.severity?.toUpperCase()}
               </div>
             </div>
           </div>
 
-          {/* Fault Location */}
-          {result.affected_segment && (
-            <div className="bg-white rounded-xl shadow-sm border
-              border-gray-100 p-6">
-              <h3 className="font-bold text-gray-800 mb-4 text-lg">
-                FALLO DETECTADO
-              </h3>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="p-4 bg-gray-50 rounded-lg">
-                  <p className="text-sm text-gray-500 mb-1">Tramo</p>
-                  <p className="font-semibold text-gray-800">
-                    {result.affected_segment.from_node || 'Splitter'}
-                    {' -> '}
-                    {result.affected_segment.to_node || 'Caja'}
+          {/* FALLO DETECTADO */}
+          <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+            <h3 className="font-bold text-gray-800 mb-4 text-lg">&#128205; FALLO DETECTADO</h3>
+            <div className="bg-gray-50 rounded-lg p-4 space-y-2">
+              {result.fault_location?.description && (
+                <p className="text-gray-800 font-semibold">{result.fault_location.description}</p>
+              )}
+              {result.affected_segment && (
+                <>
+                  <p className="text-sm text-gray-600">
+                    <span className="font-semibold">Tramo:</span> {result.affected_segment.from_node || result.affected_segment.origin_name || 'Splitter'} 
+                    {' \u2192 '} 
+                    {result.affected_segment.to_node || result.affected_segment.destination_name || 'Caja'}
                   </p>
-                </div>
-                <div className="p-4 bg-gray-50 rounded-lg">
-                  <p className="text-sm text-gray-500 mb-1">Cable</p>
-                  <p className="font-semibold text-gray-800">
-                    {result.affected_segment.cable || 'N/A'}
+                  <p className="text-sm text-gray-600">
+                    <span className="font-semibold">Cable:</span> {result.affected_segment.cable || result.affected_segment.cable_code || 'N/A'}
+                    {result.affected_segment.fiber_numbers && `, Fibra #${Array.isArray(result.affected_segment.fiber_numbers) ? result.affected_segment.fiber_numbers.join(', #') : result.affected_segment.fiber_numbers}`}
                   </p>
-                </div>
-                {result.affected_segment.fiber_numbers && (
-                  <div className="p-4 bg-gray-50 rounded-lg">
-                    <p className="text-sm text-gray-500 mb-1">Fibras</p>
-                    <p className="font-semibold text-gray-800">
-                      {Array.isArray(result.affected_segment.fiber_numbers)
-                        ? result.affected_segment.fiber_numbers.join(', ')
-                        : result.affected_segment.fiber_numbers}
-                    </p>
-                  </div>
-                )}
-                <div className="p-4 bg-gray-50 rounded-lg">
-                  <p className="text-sm text-gray-500 mb-1">Tipo</p>
-                  <p className="font-semibold capitalize text-gray-800">
-                    {result.affected_segment.segment_type || 'drop'}
+                  <p className="text-sm text-gray-600">
+                    <span className="font-semibold">Longitud:</span> {result.affected_segment.length_m || '?'} metros
                   </p>
-                </div>
-              </div>
+                </>
+              )}
+              {!result.affected_segment && result.fault_location?.description && (
+                <p className="text-sm text-gray-600">{result.fault_location.description}</p>
+              )}
             </div>
-          )}
+          </div>
 
-          {/* Power Analysis */}
+          {/* ANALISIS DE POTENCIA */}
           {result.power_analysis && (
-            <div className="bg-white rounded-xl shadow-sm border
-              border-gray-100 p-6">
-              <h3 className="font-bold text-gray-800 mb-4 text-lg">
-                ANALISIS DE POTENCIA
-              </h3>
+            <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+              <h3 className="font-bold text-gray-800 mb-4 text-lg">&#128202; ANALISIS DE POTENCIA</h3>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div className="p-4 bg-green-50 rounded-lg text-center">
-                  <p className="text-sm text-green-600 mb-1">Esperada</p>
-                  <p className="text-2xl font-bold text-green-800">
-                    {result.power_analysis.expected_dbm} dBm
-                  </p>
+                <div className="p-4 bg-green-50 rounded-lg text-center border border-green-200">
+                  <p className="text-sm text-green-600 mb-1">Potencia esperada</p>
+                  <p className="text-2xl font-bold text-green-800">{result.power_analysis.expected_dbm} dBm</p>
+                  <div className="power-bar-bg mt-2">
+                    <div className="power-bar-fill bg-green-500" style={{ width: '90%' }} />
+                  </div>
                 </div>
-                <div className="p-4 bg-red-50 rounded-lg text-center">
-                  <p className="text-sm text-red-600 mb-1">Medida</p>
-                  <p className="text-2xl font-bold text-red-800">
-                    {result.power_analysis.measured_dbm} dBm
-                  </p>
+                <div className="p-4 bg-red-50 rounded-lg text-center border border-red-200">
+                  <p className="text-sm text-red-600 mb-1">Potencia medida</p>
+                  <p className="text-2xl font-bold text-red-800">{result.power_analysis.measured_dbm} dBm</p>
+                  <div className="power-bar-bg mt-2">
+                    <div className="power-bar-fill bg-red-500" style={{ width: '15%' }} />
+                  </div>
                 </div>
-                <div className="p-4 bg-orange-50 rounded-lg text-center">
-                  <p className="text-sm text-orange-600 mb-1">Perdida</p>
-                  <p className="text-2xl font-bold text-orange-800">
-                    {result.power_analysis.loss_db} dB
-                  </p>
-                  <p className="text-xs text-orange-600 mt-1">
-                    {result.power_analysis.status || 'CORTE TOTAL'}
+                <div className="p-4 bg-orange-50 rounded-lg text-center border border-orange-200">
+                  <p className="text-sm text-orange-600 mb-1">Perdida total</p>
+                  <p className="text-2xl font-bold text-orange-800">{result.power_analysis.loss_db} dB</p>
+                  <p className="text-xs text-orange-600 mt-1 font-bold">
+                    {result.power_analysis.status || '\u26A0\uFE0F CORTE TOTAL'}
                   </p>
                 </div>
               </div>
             </div>
           )}
 
-          {/* Fault Location Details */}
+          {/* UBICACION */}
           {result.fault_location && (
-            <div className="bg-white rounded-xl shadow-sm border
-              border-gray-100 p-6">
-              <h3 className="font-bold text-gray-800 mb-4 text-lg">
-                UBICACION
-              </h3>
-              <div className="p-4 bg-gray-50 rounded-lg">
-                <p className="text-gray-800 mb-1">
-                  <strong>Direccion:</strong>
-                  {' '}{result.fault_location.address || 'N/A'}
+            <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+              <h3 className="font-bold text-gray-800 mb-4 text-lg">&#127759; UBICACION</h3>
+              <div className="bg-gray-50 rounded-lg p-4 space-y-2">
+                <p className="text-gray-800">
+                  <span className="font-semibold">Direccion:</span> {result.fault_location.address || 'N/A'}
                 </p>
                 {result.fault_location.coordinates && (
                   <p className="text-sm text-gray-500 font-mono">
-                    {result.fault_location.coordinates[0].toFixed(4)},
-                    {' '}{result.fault_location.coordinates[1].toFixed(4)}
-                  </p>
-                )}
-                {result.fault_location.description && (
-                  <p className="text-sm text-gray-600 mt-2">
-                    {result.fault_location.description}
+                    Coordenadas: {result.fault_location.coordinates[0]?.toFixed(4)}, {result.fault_location.coordinates[1]?.toFixed(4)}
                   </p>
                 )}
               </div>
             </div>
           )}
 
-          {/* Recommended Action */}
+          {/* ACCION RECOMENDADA */}
           {result.recommended_action && (
-            <div className="bg-white rounded-xl shadow-sm border
-              border-gray-100 p-6">
-              <h3 className="font-bold text-gray-800 mb-4 text-lg">
-                ACCION RECOMENDADA
-              </h3>
-              <div className="p-4 bg-blue-50 rounded-lg border
-                border-blue-100">
-                <pre className="text-sm text-blue-900 whitespace-pre-wrap
-                  font-sans leading-relaxed">
-                  {result.recommended_action}
-                </pre>
+            <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+              <h3 className="font-bold text-gray-800 mb-4 text-lg">&#128295; ACCION RECOMENDADA</h3>
+              <div className="bg-blue-50 rounded-lg border border-blue-100 p-4">
+                <div className="space-y-3">
+                  {result.recommended_action.split('\n').map((line, i) => {
+                    const match = line.match(/^(\d+)\.\s*(.+)$/);
+                    if (match) {
+                      return (
+                        <div key={i} className="flex items-start gap-3">
+                          <div className="step-number">{match[1]}</div>
+                          <p className="text-sm text-blue-900 pt-1">{match[2]}</p>
+                        </div>
+                      );
+                    }
+                    return <p key={i} className="text-sm text-blue-900">{line}</p>;
+                  })}
+                </div>
               </div>
             </div>
           )}
 
-          {/* Affected Route Map */}
+          {/* MAPA DEL TRAMO AFECTADO */}
           {result.affected_route && (
-            <div className="bg-white rounded-xl shadow-sm border
-              border-gray-100 p-6">
-              <h3 className="font-bold text-gray-800 mb-4 text-lg">
-                MAPA DEL TRAMO AFECTADO
-              </h3>
-              <div ref={miniMapRef}
-                className="w-full h-64 rounded-lg border
-                  border-gray-200" />
+            <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+              <h3 className="font-bold text-gray-800 mb-4 text-lg">&#127758; MAPA DEL TRAMO AFECTADO</h3>
+              <div ref={miniMapRef} className="w-full h-64 rounded-lg border border-gray-200" />
             </div>
           )}
 
-          {/* Affected Clients */}
-          {result.affected_clients && (
-            <div className="bg-white rounded-xl shadow-sm border
-              border-gray-100 p-6">
-              <h3 className="font-bold text-gray-800 mb-3 text-lg">
-                CLIENTES AFECTADOS
-                {' '}({result.affected_clients.length})
+          {/* CLIENTES AFECTADOS */}
+          {result.affected_clients && result.affected_clients.length > 0 && (
+            <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+              <h3 className="font-bold text-gray-800 mb-4 text-lg">
+                &#128101; CLIENTES AFECTADOS ({result.affected_clients.length})
               </h3>
-              <div className="space-y-2">
-                {result.affected_clients.map((c, i) => (
-                  <div key={i}
-                    className="flex items-center justify-between p-3
-                      bg-red-50 rounded-lg">
-                    <div>
-                      <span className="text-sm font-semibold text-red-800
-                        block">
-                        {c.client_code || c.code}
-                      </span>
-                      <span className="text-sm text-red-600">
-                        {c.full_name || c.name}
-                      </span>
-                    </div>
-                    {c.address && (
-                      <span className="text-xs text-gray-500">
-                        {c.address}
-                      </span>
-                    )}
-                  </div>
-                ))}
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-50 text-gray-600">
+                    <tr>
+                      <th className="px-3 py-2 text-left">#</th>
+                      <th className="px-3 py-2 text-left">Codigo</th>
+                      <th className="px-3 py-2 text-left">Nombre</th>
+                      <th className="px-3 py-2 text-center">Potencia</th>
+                      <th className="px-3 py-2 text-center">Estado</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-50">
+                    {result.affected_clients.map((c, i) => (
+                      <tr key={i} className="hover:bg-red-50">
+                        <td className="px-3 py-2 text-gray-500">{i + 1}</td>
+                        <td className="px-3 py-2 font-mono text-sm">{c.client_code || c.code}</td>
+                        <td className="px-3 py-2">{c.full_name || c.name}</td>
+                        <td className="px-3 py-2 text-center font-mono">
+                          {c.power_dbm || c.optical_power_rx || '-'} dBm
+                        </td>
+                        <td className="px-3 py-2 text-center">
+                          <span className="text-red-600 font-bold">&#128308;</span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             </div>
           )}
 
-          {/* Reset Button */}
+          {/* Boton nuevo diagnostico */}
           <button onClick={reset}
-            className="w-full px-4 py-3 bg-blue-600 text-white
-              rounded-lg font-semibold hover:bg-blue-700">
-            Nuevo diagnostico
+            className="w-full px-4 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700">
+              Nuevo diagnostico
           </button>
         </div>
       )}
@@ -1448,104 +1175,88 @@ function DiagnoseV2() {
 }
 
 /* ============================================================
-   TOPOLOGY
+   7. TOPOLOGY - Arbol jerarquico expandible
    ============================================================ */
 
 function TopologyNode({ node, level = 0 }) {
-  const [expanded, setExpanded] = useState(level < 2);
+  const [expanded, setExpanded] = useState(level < 3);
   const hasChildren = node.children && node.children.length > 0;
 
-  const getIcon = () => {
-    const t = node.type;
-    if (t === 'olt') return '\uD83D\uDCE1';
-    if (t === 'splice') return '\u2696';
-    if (t === 'splitter') return '\u2726';
-    if (t === 'box') return '\uD83D\uDCE6';
-    if (t === 'client') return '\uD83D\uDC64';
-    if (t === 'cable') return '\uD83D\uDCE1';
-    return '\u25CF';
-  };
-
-  const getTypeColor = () => {
-    const t = node.type;
-    if (t === 'olt') return '#2563eb';
-    if (t === 'splice') return '#fbbf24';
-    if (t === 'splitter') return '#f97316';
-    if (t === 'box') return '#0ea5e9';
-    if (t === 'client') return '#16a34a';
-    if (t === 'cable') return '#dc2626';
-    return '#666';
-  };
-
-  const getTypeLabel = () => {
-    const t = node.type;
-    if (t === 'olt') return 'OLT';
-    if (t === 'cable' && node.cable_type === 'feeder')
-      return 'Feeder';
-    if (t === 'cable' && node.cable_type === 'distribution')
-      return 'Distribution';
-    if (t === 'cable' && node.cable_type === 'drop')
-      return 'Drop';
-    if (t === 'cable') return 'Cable';
-    if (t === 'splice') return 'Empalme';
-    if (t === 'splitter') return 'Splitter';
-    if (t === 'box') return 'CTO';
-    if (t === 'client') return 'Cliente';
-    return t;
-  };
+  const indent = level * 20;
 
   return (
-    <div className="select-none">
+    <div className="topology-tree">
       <div
-        className="flex items-center gap-2 py-1.5 px-2 rounded-lg
-          hover:bg-gray-50 cursor-pointer transition-colors"
-        style={{paddingLeft: `${level * 20 + 8}px`}}
-        onClick={() => hasChildren && setExpanded(!expanded)}>
-        {hasChildren ? (
-          <span className="text-gray-400 text-xs w-4 text-center">
-            {expanded ? '\u25BC' : '\u25B6'}
-          </span>
-        ) : (
-          <span className="w-4" />
+        className="flex items-center gap-1 py-1 px-1 rounded hover:bg-gray-50 cursor-pointer select-none"
+        style={{ paddingLeft: (indent + 8) + 'px' }}
+        onClick={() => hasChildren && setExpanded(!expanded)}
+      >
+        {/* Expand/collapse icon */}
+        <span className="expand-btn w-4 text-center text-gray-400 text-xs">
+          {hasChildren ? (expanded ? '\u25BC' : '\u25B6') : ''}
+        </span>
+
+        {/* Type icon */}
+        <span className="text-sm mr-1">
+          {node.type === 'olt' && '\uD83D\uDCE1'}
+          {node.type === 'cable' && node.cable_type === 'feeder' && '\uD83D\udd34'}
+          {node.type === 'cable' && node.cable_type === 'distribution' && '\uD83D\udd35'}
+          {node.type === 'cable' && node.cable_type === 'drop' && '\uD83D\udfe2'}
+          {node.type === 'splice' && '\u26ab'}
+          {node.type === 'splitter' && '\u2B50'}
+          {node.type === 'box' && '\u25A1'}
+          {node.type === 'zone_group' && '\uD83C\uDFD8'}
+        </span>
+
+        {/* Name and code */}
+        <span className="text-sm font-semibold text-gray-800 truncate" title={node.name}>
+          {node.name}
+        </span>
+
+        {/* Code badge */}
+        {node.code && node.code !== node.name && (
+          <span className="text-[10px] text-gray-400 font-mono ml-1">{node.code}</span>
         )}
-        <span className="text-lg">{getIcon()}</span>
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2">
-            <span className="font-semibold text-sm text-gray-800
-              truncate">
-              {node.name || node.code || 'Sin nombre'}
-            </span>
-            <span
-              className="text-[10px] px-1.5 py-0.5 rounded-full
-                font-medium text-white"
-              style={{backgroundColor: getTypeColor()}}>
-              {getTypeLabel()}
-            </span>
-          </div>
-          {node.code && node.code !== node.name && (
-            <span className="text-xs text-gray-400 font-mono">
-              {node.code}
-            </span>
-          )}
-        </div>
-        {node.fiber_count && (
-          <span className="text-xs text-gray-500">
-            {node.used_fibers || 0}/{node.fiber_count} fibras
+
+        {/* Type badge */}
+        <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-medium ml-1 ${
+          node.type === 'olt' ? 'bg-red-100 text-red-700'
+          : node.type === 'cable' && node.cable_type === 'feeder' ? 'bg-red-100 text-red-700'
+          : node.type === 'cable' && node.cable_type === 'distribution' ? 'bg-blue-100 text-blue-700'
+          : node.type === 'cable' && node.cable_type === 'drop' ? 'bg-green-100 text-green-700'
+          : node.type === 'splice' ? 'bg-yellow-100 text-yellow-700'
+          : node.type === 'splitter' ? 'bg-orange-100 text-orange-700'
+          : node.type === 'box' ? 'bg-blue-100 text-blue-700'
+          : 'bg-gray-100 text-gray-600'
+        }`}>
+          {node.type === 'cable' ? node.cable_type : node.type}
+        </span>
+
+        {/* Extra info */}
+        {node.ratio && (
+          <span className="text-[10px] text-orange-600 ml-1">1:{node.ratio}</span>
+        )}
+        {node.output_power_dbm && (
+          <span className="text-[10px] text-gray-500 ml-1">{node.output_power_dbm}dBm</span>
+        )}
+        {node.fiber_count !== undefined && (
+          <span className="text-[10px] text-gray-400 ml-1">
+            {node.fibers_used || node.used_fibers || 0}/{node.fiber_count}f
           </span>
         )}
         {node.client_count !== undefined && (
-          <span className="text-xs bg-blue-100 text-blue-700 px-2
-            py-0.5 rounded-full">
-            {node.client_count} cli.
+          <span className="text-[10px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded-full ml-1">
+            {node.client_count}cli
           </span>
         )}
         {node.affected_count > 0 && (
-          <span className="text-xs bg-red-100 text-red-700 px-2
-            py-0.5 rounded-full font-bold">
+          <span className="text-[10px] bg-red-100 text-red-700 px-1.5 py-0.5 rounded-full ml-1 font-bold">
             {node.affected_count}
           </span>
         )}
       </div>
+
+      {/* Children */}
       {expanded && hasChildren && (
         <div>
           {node.children.map((child, i) => (
@@ -1560,11 +1271,10 @@ function TopologyNode({ node, level = 0 }) {
 function Topology() {
   const [topology, setTopology] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [searchTerm, setSearchTerm] = useState('');
 
   useEffect(() => {
     const load = async () => {
-      const t = await fetchAPI('/topology/');
+      const t = await fetchAPI('/api/topology/');
       setTopology(t);
       setLoading(false);
     };
@@ -1572,89 +1282,105 @@ function Topology() {
   }, []);
 
   const buildTree = () => {
-    if (!topology || !topology.olt) return null;
+    if (!topology) return null;
 
+    // OLT root
     const root = {
       type: 'olt',
-      name: topology.olt.name,
-      code: topology.olt.code,
-      fiber_count: topology.olt.fiber_capacity,
+      name: topology.olt?.name || 'OLT-CIEZA-01',
+      code: topology.olt?.code,
+      output_power_dbm: topology.olt?.output_power_dbm,
+      ratio: topology.olt?.splitter_ratio,
       children: []
     };
 
-    // Add feeder cables
-    (topology.cables || [])
-      .filter(c => c.cable_type === 'feeder')
-      .forEach(c => {
-        root.children.push({
-          type: 'cable',
-          name: c.code,
-          code: c.code,
-          cable_type: c.cable_type,
-          fiber_count: c.fiber_count,
-          used_fibers: c.used_fibers,
-          children: []
-        });
-      });
-
-    // Group by zone: splice -> splitter -> boxes
-    const zoneGroups = {};
-    (topology.splices || []).forEach(sp => {
-      const zoneCode = sp.zone_code || 'General';
-      if (!zoneGroups[zoneCode]) {
-        zoneGroups[zoneCode] = {
-          type: 'zone_group',
-          name: sp.zone_name || zoneCode,
-          code: zoneCode,
-          color: ZONE_COLORS[zoneCode] || '#666',
-          children: []
-        };
-      }
-      const spliceNode = {
-        type: 'splice',
-        name: sp.name,
-        code: sp.code,
-        fiber_count: sp.fiber_capacity,
-        used_fibers: sp.used_fibers,
+    // Process each zone branch
+    const zonesData = topology.zones || [];
+    zonesData.forEach(z => {
+      const zoneNode = {
+        type: 'zone_group',
+        name: z.zone?.name || 'Zona',
+        code: z.zone?.code,
+        client_count: z.zone?.client_count,
+        affected_count: z.zone?.affected_client_count,
         children: []
       };
 
-      const connectedSplitters = (topology.splitters || []).filter(
-        spl => spl.splice_code === sp.code
-      );
-      connectedSplitters.forEach(spl => {
-        const splitterNode = {
-          type: 'splitter',
-          name: spl.name,
-          code: spl.code,
-          fiber_count: spl.ratio,
-          client_count: spl.client_count || 0,
-          affected_count: spl.affected_count || 0,
+      // Feeder cables for this zone
+      (z.cables || []).filter(c => c.cable_type === 'feeder').forEach(c => {
+        zoneNode.children.push({
+          type: 'cable',
+          name: c.code,
+          code: c.code,
+          cable_type: 'feeder',
+          fiber_count: c.fiber_count,
+          fibers_used: c.fibers_used || c.used_fibers,
+          children: []
+        });
+      });
+
+      // Splice -> splitter -> drop cable -> boxes
+      if (z.splice) {
+        const spliceNode = {
+          type: 'splice',
+          name: z.splice.name || z.splice.code,
+          code: z.splice.code,
+          fiber_count: z.splice.fiber_capacity,
+          fibers_used: z.splice.fiber_count_used,
           children: []
         };
 
-        const connectedBoxes = (topology.boxes || []).filter(
-          b => b.splitter_code === spl.code
-        );
-        connectedBoxes.forEach(b => {
-          splitterNode.children.push({
-            type: 'box',
-            name: b.name,
-            code: b.code,
-            client_count: b.client_count || 0,
-            affected_count: b.affected_count || 0,
+        // Splitters connected to this splice
+        (z.splitters || []).forEach(spl => {
+          const splitterNode = {
+            type: 'splitter',
+            name: spl.name || spl.code,
+            code: spl.code,
+            ratio: spl.ratio,
+            output_power_dbm: spl.output_power_dbm,
+            client_count: spl.client_count,
+            affected_count: spl.affected_count,
             children: []
+          };
+
+          // Drop cables from this splitter
+          (z.cables || []).filter(c => c.cable_type === 'drop').forEach(dc => {
+            const dropNode = {
+              type: 'cable',
+              name: dc.code,
+              code: dc.code,
+              cable_type: 'drop',
+              fiber_count: dc.fiber_count,
+              fibers_used: dc.fibers_used || dc.used_fibers,
+              children: []
+            };
+
+            // Boxes on this drop cable
+            (z.boxes || []).filter(b => b.input_cable_code === dc.code).forEach(b => {
+              dropNode.children.push({
+                type: 'box',
+                name: b.name,
+                code: b.code,
+                client_count: b.client_count,
+                affected_count: b.affected_count,
+                output_power_dbm: b.measured_power_dbm || b.expected_power_dbm,
+                fiber_number: b.input_fiber_number,
+                children: []
+              });
+            });
+
+            if (dropNode.children.length > 0) {
+              splitterNode.children.push(dropNode);
+            }
           });
+
+          spliceNode.children.push(splitterNode);
         });
 
-        spliceNode.children.push(splitterNode);
-      });
+        zoneNode.children.push(spliceNode);
+      }
 
-      zoneGroups[zoneCode].children.push(spliceNode);
-    });
-
-    Object.values(zoneGroups).forEach(zg => {
-      root.children.push(zg);
+      root.children.push(zoneNode);
     });
 
     return root;
@@ -1663,146 +1389,83 @@ function Topology() {
   const tree = buildTree();
 
   if (loading) {
-    return (
-      <div className="p-8 text-center text-gray-500">
-        Cargando topologia...
-      </div>
-    );
+    return <div className="p-8 text-center text-gray-500">Cargando topologia...</div>;
   }
 
-  const cableCount = topology?.cables?.length || 0;
-  const spliceCount = topology?.splices?.length || 0;
-  const splitterCount = topology?.splitters?.length || 0;
-  const boxCount = topology?.boxes?.length || 0;
-  const totalClients = (topology?.boxes || []).reduce(
-    (s, b) => s + (b.client_count || 0), 0);
-  const totalAffected = (topology?.boxes || []).reduce(
-    (s, b) => s + (b.affected_count || 0), 0);
+  const boxCount = topology?.zones?.reduce((s, z) => s + (z.boxes?.length || 0), 0) || 0;
+  const totalClients = topology?.zones?.reduce((s, z) => s + (z.zone?.client_count || 0), 0) || 0;
+  const totalAffected = topology?.zones?.reduce((s, z) => s + (z.zone?.affected_client_count || 0), 0) || 0;
+  const cableCount = topology?.zones?.reduce((s, z) => s + (z.cables?.length || 0), 0) || 0;
+  const spliceCount = topology?.zones?.reduce((s, z) => s + (z.splice ? 1 : 0), 0) || 0;
+  const splitterCount = topology?.zones?.reduce((s, z) => s + (z.splitters?.length || 0), 0) || 0;
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-6 space-y-6">
       {/* Stats */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-        { [
-          { l: 'Cables', v: cableCount, c: 'text-red-600 bg-red-50' },
-          { l: 'Empalmes', v: spliceCount,
-            c: 'text-yellow-600 bg-yellow-50' },
-          { l: 'Splitters', v: splitterCount,
-            c: 'text-orange-600 bg-orange-50' },
-          { l: 'Cajas', v: boxCount,
-            c: 'text-blue-600 bg-blue-50' },
-          { l: 'Clientes', v: totalClients,
-            c: totalAffected > 0
-              ? 'text-red-600 bg-red-50'
-              : 'text-green-600 bg-green-50' },
+        {[
+          { l: 'OLT', v: 1, c: 'text-red-600' },
+          { l: 'Zonas', v: topology?.zones?.length || 0, c: 'text-purple-600' },
+          { l: 'Cables', v: cableCount, c: 'text-blue-600' },
+          { l: 'Cajas', v: boxCount, c: 'text-blue-600' },
+          { l: 'Clientes', v: totalClients, c: totalAffected > 0 ? 'text-red-600' : 'text-green-600' },
         ].map((s, i) => (
-          <div key={i}
-            className="bg-white rounded-xl shadow-sm p-4 border
-              border-gray-100 text-center">
-            <p className={`text-3xl font-bold ${s.c.split(' ')[0]}`}>
-              {s.v}
-            </p>
+          <div key={i} className="bg-white rounded-xl shadow-sm p-4 border border-gray-100 text-center">
+            <p className={`text-3xl font-bold ${s.c}`}>{s.v}</p>
             <p className="text-xs text-gray-500 mt-1">{s.l}</p>
           </div>
         ))}
       </div>
 
-      {/* Topology Tree */}
-      <div className="bg-white rounded-xl shadow-sm border border-gray-100
-        overflow-hidden">
-        <div className="px-6 py-4 border-b border-gray-100 flex
-          items-center justify-between flex-wrap gap-3">
-          <div>
-            <h2 className="text-lg font-bold text-gray-800">
-              Topologia de Red
-            </h2>
-            <p className="text-xs text-gray-500">
-              OLT &rarr; Splice &rarr; Splitter &rarr; Cajas &rarr; Clientes
-            </p>
-          </div>
-          <div className="flex gap-2">
-            <input type="text"
-              value={searchTerm}
-              onChange={e => setSearchTerm(e.target.value)}
-              placeholder="Buscar elemento..."
-              className="px-3 py-1.5 border border-gray-300 rounded-lg
-                text-sm focus:outline-none focus:border-blue-500" />
-          </div>
+      {/* Tree */}
+      <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+        <div className="px-6 py-4 border-b border-gray-100">
+          <h2 className="text-lg font-bold text-gray-800">&#127795; Topologia de Red</h2>
+          <p className="text-xs text-gray-500">OLT &rarr; Feeder &rarr; Splice &rarr; Distribution &rarr; Splitter &rarr; Drop &rarr; Cajas</p>
         </div>
-        <div className="p-4 max-h-[60vh] overflow-y-auto">
-          {tree ? (
-            <TopologyNode node={tree} />
-          ) : (
-            <div className="text-center text-gray-400 py-8">
-              No hay datos de topologia disponibles
-            </div>
+        <div className="p-4 max-h-[70vh] overflow-y-auto">
+          {tree ? <TopologyNode node={tree} /> : (
+            <div className="text-center text-gray-400 py-8">No hay datos de topologia disponibles</div>
           )}
         </div>
       </div>
 
-      {/* Cable Paths Summary */}
-      <div className="bg-white rounded-xl shadow-sm border border-gray-100
-        overflow-hidden">
+      {/* Cable details */}
+      <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
         <div className="px-6 py-4 border-b border-gray-100">
-          <h2 className="text-lg font-bold text-gray-800">
-            Rutas de Cable
-          </h2>
+          <h2 className="text-lg font-bold text-gray-800">&#128225; Cables por Zona</h2>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="bg-gray-50 text-gray-600">
               <tr>
-                <th className="px-4 py-2 text-left">Ruta</th>
+                <th className="px-4 py-2 text-left">Cable</th>
+                <th className="px-4 py-2 text-left">Tipo</th>
+                <th className="px-4 py-2 text-left">Zona</th>
                 <th className="px-4 py-2 text-center">Fibras</th>
                 <th className="px-4 py-2 text-center">Usadas</th>
-                <th className="px-4 py-2 text-center">Cajas</th>
-                <th className="px-4 py-2 text-center">Afectados</th>
+                <th className="px-4 py-2 text-center">Longitud</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-50">
-              {(topology?.cables || [])
-                .filter(c => c.cable_type === 'distribution')
-                .map(c => {
-                  const zoneBoxes = (topology?.boxes || []).filter(
-                    b => b.zone_code === c.zone_code);
-                  const zoneAffected = zoneBoxes.reduce(
-                    (s, b) => s + (b.affected_count || 0), 0);
-                  return (
-                    <tr key={c.id} className="hover:bg-gray-50">
-                      <td className="px-4 py-2">
-                        <span className="font-semibold text-blue-700">
-                          {c.code}
-                        </span>
-                        <span className="text-xs text-gray-500 ml-2">
-                          {c.zone_name}
-                        </span>
-                      </td>
-                      <td className="px-4 py-2 text-center">
-                        {c.fiber_count}
-                      </td>
-                      <td className="px-4 py-2 text-center">
-                        <span className={c.used_fibers > c.fiber_count * 0.8
-                          ? 'text-red-600 font-bold'
-                          : 'text-gray-600'}>
-                          {c.used_fibers}/{c.fiber_count}
-                        </span>
-                      </td>
-                      <td className="px-4 py-2 text-center">
-                        {zoneBoxes.length}
-                      </td>
-                      <td className="px-4 py-2 text-center">
-                        {zoneAffected > 0 ? (
-                          <span className="text-red-600 font-bold
-                            bg-red-50 px-2 py-0.5 rounded-full">
-                            {zoneAffected}
-                          </span>
-                        ) : (
-                          <span className="text-green-600">0</span>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
+              {(topology?.zones || []).flatMap(z =>
+                (z.cables || []).map(c => (
+                  <tr key={c.id} className="hover:bg-gray-50">
+                    <td className="px-4 py-2 font-mono font-semibold">{c.code}</td>
+                    <td className="px-4 py-2">
+                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                        c.cable_type === 'feeder' ? 'bg-red-100 text-red-700'
+                        : c.cable_type === 'distribution' ? 'bg-blue-100 text-blue-700'
+                        : 'bg-green-100 text-green-700'
+                      }`}>{c.cable_type}</span>
+                    </td>
+                    <td className="px-4 py-2 text-xs">{z.zone?.name}</td>
+                    <td className="px-4 py-2 text-center">{c.fiber_count}</td>
+                    <td className="px-4 py-2 text-center">{c.fibers_used || c.used_fibers || 0}</td>
+                    <td className="px-4 py-2 text-center">{c.length_m}m</td>
+                  </tr>
+                ))
+              )}
             </tbody>
           </table>
         </div>
@@ -1812,7 +1475,7 @@ function Topology() {
 }
 
 /* ============================================================
-   SIMULATE
+   8. SIMULATE
    ============================================================ */
 
 function Simulate() {
@@ -1823,32 +1486,23 @@ function Simulate() {
   const [simType, setSimType] = useState('box');
 
   useEffect(() => {
-    fetchAPI('/boxes/').then(b =>
-      setBoxes(b?.results || b || []));
-    fetchAPI('/splitters/').then(s =>
-      setSplitters(s?.results || s || []));
+    fetchAPI('/api/boxes/').then(b => setBoxes(b || []));
+    fetchAPI('/api/splitters/').then(s => setSplitters(s || []));
   }, []);
 
   const simulateRandom = async () => {
     setLoading(true);
-    const allClients = await fetchAPI('/clients/');
-    const clientList = allClients?.results || allClients || [];
 
     if (simType === 'box') {
-      const activeBoxes = boxes.filter(b => b.is_active);
-      const targetBox = activeBoxes[
-        Math.floor(Math.random() * activeBoxes.length)];
+      const activeBoxes = boxes.filter(b => b.client_count > 0);
+      const targetBox = activeBoxes[Math.floor(Math.random() * activeBoxes.length)];
       if (targetBox) {
-        const boxClients = clientList.filter(
-          c => c.box === targetBox.id);
-        const numAffected = Math.min(
-          Math.floor(Math.random() * 3) + 2,
-          boxClients.length);
-        const affectedClients = boxClients
-          .sort(() => 0.5 - Math.random())
-          .slice(0, numAffected);
+        const boxClients = await fetchAPI('/api/boxes/' + targetBox.id + '/clients/');
+        const clientList = boxClients || [];
+        const numAffected = Math.min(Math.floor(Math.random() * 3) + 1, clientList.length);
+        const affectedClients = clientList.sort(() => 0.5 - Math.random()).slice(0, numAffected);
         for (const c of affectedClients) {
-          await postAPI('/clients/report_outage/', { client_id: c.id });
+          await postAPI('/api/clients/report_outage/', { client_id: c.id });
         }
         setResult({
           type: 'box',
@@ -1857,149 +1511,118 @@ function Simulate() {
         });
       }
     } else {
-      const targetSpl = splitters[
-        Math.floor(Math.random() * splitters.length)];
+      const targetSpl = splitters[Math.floor(Math.random() * splitters.length)];
       if (targetSpl) {
-        const splClients = clientList.filter(
-          c => c.splitter === targetSpl.id);
-        for (const c of splClients.slice(0, 5)) {
-          await postAPI('/clients/report_outage/', { client_id: c.id });
+        const allBoxes = await fetchAPI('/api/boxes/');
+        const splBoxes = (allBoxes || []).filter(b => b.splitter_code === targetSpl.code);
+        let count = 0;
+        for (const b of splBoxes) {
+          const boxClients = await fetchAPI('/api/boxes/' + b.id + '/clients/');
+          for (const c of (boxClients || []).slice(0, 2)) {
+            await postAPI('/api/clients/report_outage/', { client_id: c.id });
+            count++;
+          }
         }
         setResult({
           type: 'splitter',
           splitter: targetSpl,
-          affectedCount: splClients.length
+          affectedCount: count
         });
       }
     }
 
-    const updated = await fetchAPI('/boxes/');
-    setBoxes(updated?.results || updated || []);
+    const updated = await fetchAPI('/api/boxes/');
+    setBoxes(updated || []);
     setLoading(false);
   };
 
   const resetAll = async () => {
     setLoading(true);
-    const allClients = await fetchAPI('/clients/');
-    for (const c of (allClients?.results || allClients || [])) {
-      if (c.status === 'affected') {
-        await fetch(`${API_URL}/clients/${c.id}/`, {
-          method: 'PATCH',
-          headers: apiHeaders(),
-          body: JSON.stringify({ status: 'active' })
-        });
+    setResult(null);
+    const allBoxes = await fetchAPI('/api/boxes/');
+    for (const b of (allBoxes || [])) {
+      const clients = await fetchAPI('/api/boxes/' + b.id + '/clients/');
+      for (const c of (clients || [])) {
+        if (c.status === 'affected') {
+          await fetch(API_URL + '/api/clients/' + c.id + '/', {
+            method: 'PATCH',
+            headers: apiHeaders(),
+            body: JSON.stringify({ status: 'active' })
+          });
+        }
       }
     }
-    setResult(null);
-    const updated = await fetchAPI('/boxes/');
-    setBoxes(updated?.results || updated || []);
+    const updated = await fetchAPI('/api/boxes/');
+    setBoxes(updated || []);
     setLoading(false);
   };
 
-  const affectedBoxes = boxes.filter(b => b.affected_count > 0);
-  const totalAffected = affectedBoxes.reduce(
-    (s, b) => s + b.affected_count, 0);
+  const affectedBoxes = boxes.filter(b => (b.affected_count || 0) > 0);
+  const totalAffected = affectedBoxes.reduce((s, b) => s + (b.affected_count || 0), 0);
 
   return (
     <div className="max-w-4xl mx-auto px-4 py-6">
-      <div className="bg-white rounded-xl shadow-sm border border-gray-100
-        p-8">
-        <h2 className="text-xl font-bold text-gray-800 mb-2">
-          Simulador de Averias
-        </h2>
-        <p className="text-gray-500 mb-6">
-          Inyecta averias aleatorias para probar el algoritmo.
-        </p>
+      <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-8">
+        <h2 className="text-xl font-bold text-gray-800 mb-2">Simulador de Averias</h2>
+        <p className="text-gray-500 mb-6">Inyecta averias aleatorias para probar el algoritmo de diagnostico.</p>
 
         <div className="flex gap-2 mb-6">
           <button onClick={() => setSimType('box')}
             className={`px-4 py-2 rounded-lg text-sm font-medium ${
-              simType === 'box'
-                ? 'bg-blue-100 text-blue-700 border-2 border-blue-300'
-                : 'bg-gray-50 text-gray-600 border border-gray-200'}`}>
+              simType === 'box' ? 'bg-blue-100 text-blue-700 border-2 border-blue-300' : 'bg-gray-50 text-gray-600 border border-gray-200'
+            }`}>
             A nivel de Caja
           </button>
           <button onClick={() => setSimType('splitter')}
             className={`px-4 py-2 rounded-lg text-sm font-medium ${
-              simType === 'splitter'
-                ? 'bg-orange-100 text-orange-700 border-2 border-orange-300'
-                : 'bg-gray-50 text-gray-600 border border-gray-200'}`}>
+              simType === 'splitter' ? 'bg-orange-100 text-orange-700 border-2 border-orange-300' : 'bg-gray-50 text-gray-600 border border-gray-200'
+            }`}>
             A nivel de Splitter
           </button>
         </div>
 
         <div className="flex gap-4 mb-6">
           <button onClick={simulateRandom} disabled={loading}
-            className="flex-1 px-6 py-4 bg-red-500 text-white rounded-lg
-              font-bold text-lg hover:bg-red-600 disabled:opacity-50">
+            className="flex-1 px-6 py-4 bg-red-500 text-white rounded-lg font-bold text-lg hover:bg-red-600 disabled:opacity-50">
             {loading ? '...' : 'Simular averia'}
           </button>
           <button onClick={resetAll} disabled={loading}
-            className="px-6 py-4 bg-green-500 text-white rounded-lg
-              font-bold hover:bg-green-600 disabled:opacity-50">
+            className="px-6 py-4 bg-green-500 text-white rounded-lg font-bold hover:bg-green-600 disabled:opacity-50">
             Restaurar todo
           </button>
         </div>
 
         {result && (
-          <div className="mb-6 p-4 bg-orange-50 border border-orange-200
-            rounded-lg">
-            <h3 className="font-bold text-orange-800 mb-2">
-              Simulacion ejecutada
-            </h3>
+          <div className="mb-6 p-4 bg-orange-50 border border-orange-200 rounded-lg">
+            <h3 className="font-bold text-orange-800 mb-2">Simulacion ejecutada</h3>
             <p className="text-sm text-orange-700">
               {result.type === 'box'
-                ? `${result.affectedCount} clientes de
-                    ${result.box.code} marcados como afectados.`
-                : `${result.affectedCount} clientes del splitter
-                    ${result.splitter.code} afectados.`}
+                ? `${result.affectedCount} cliente(s) de ${result.box.code} marcados como afectados.`
+                : `${result.affectedCount} cliente(s) del splitter ${result.splitter.code} afectados.`}
             </p>
           </div>
         )}
 
         <div className="border-t border-gray-100 pt-6">
-          <h3 className="font-bold text-gray-700 mb-4">
-            Estado actual
-          </h3>
+          <h3 className="font-bold text-gray-700 mb-4">Estado actual</h3>
           {affectedBoxes.length === 0 ? (
-            <div className="p-4 bg-green-50 border border-green-200
-              rounded-lg text-center">
-              <p className="text-green-700 font-semibold text-lg">
-                Todo operativo
-              </p>
-              <p className="text-green-600 text-sm mt-1">
-                No hay clientes afectados
-              </p>
+            <div className="p-4 bg-green-50 border border-green-200 rounded-lg text-center">
+              <p className="text-green-700 font-semibold text-lg">&#9989; Todo operativo</p>
+              <p className="text-green-600 text-sm mt-1">No hay clientes afectados</p>
             </div>
           ) : (
             <div className="space-y-3">
               <div className="flex items-center justify-between mb-4">
-                <span className="text-sm text-gray-600">
-                  {affectedBoxes.length} cajas con averias
-                </span>
-                <span className="text-sm font-bold text-red-600">
-                  {totalAffected} clientes afectados
-                </span>
+                <span className="text-sm text-gray-600">{affectedBoxes.length} caja(s) con averias</span>
+                <span className="text-sm font-bold text-red-600">{totalAffected} cliente(s) afectado(s)</span>
               </div>
               {affectedBoxes.map(b => (
-                <div key={b.id}
-                  className="flex items-center justify-between p-3
-                    bg-red-50 border border-red-200 rounded-lg">
+                <div key={b.id} className="flex items-center justify-between p-3 bg-red-50 border border-red-200 rounded-lg">
                   <div>
-                    <span className="font-mono font-bold text-red-800">
-                      {b.code}
-                    </span>
-                    <span className="text-sm text-gray-600 ml-2">
-                      {b.name}
-                    </span>
-                    <span className="text-xs text-gray-400 ml-2">
-                      {b.zone_name}
-                    </span>
+                    <span className="font-mono font-bold text-red-800">{b.code}</span>
+                    <span className="text-sm text-gray-600 ml-2">{b.name}</span>
                   </div>
-                  <span className="bg-red-500 text-white px-3 py-1
-                    rounded-full text-sm font-bold">
-                    {b.affected_count}
-                  </span>
+                  <span className="bg-red-500 text-white px-3 py-1 rounded-full text-sm font-bold">{b.affected_count}</span>
                 </div>
               ))}
             </div>
@@ -2011,7 +1634,7 @@ function Simulate() {
 }
 
 /* ============================================================
-   APP
+   9. APP ROOT
    ============================================================ */
 
 function App() {
@@ -2037,8 +1660,7 @@ function App() {
     <div className="min-h-screen bg-gray-100">
       <Header activeTab={activeTab} setActiveTab={setActiveTab} />
       <main>{renderTab()}</main>
-      <footer className="bg-gray-800 text-gray-400 text-center py-4
-        text-sm mt-8">
+      <footer className="bg-gray-800 text-gray-400 text-center py-4 text-sm mt-8">
         <p>FiberTruck v2.0 - TFM Master Full Stack</p>
         <p>Despliegue FTTH ficticio de Cieza, Murcia</p>
       </footer>
