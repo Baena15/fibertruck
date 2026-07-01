@@ -1,1 +1,1 @@
-web: echo "=== Running migrations ===" && python manage.py migrate && echo "=== Running auto_setup ===" && python manage.py auto_setup && echo "=== Starting gunicorn ===" && gunicorn fibertruck.wsgi:application --bind 0.0.0.0:$PORT
+web: rm -f db.sqlite3 && python manage.py migrate && python manage.py auto_setup && gunicorn fibertruck.wsgi:application --bind 0.0.0.0:$PORT
