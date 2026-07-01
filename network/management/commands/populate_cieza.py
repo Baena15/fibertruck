@@ -124,16 +124,65 @@ def calc_power_at_client(olt_power, feeder_km, dist_km, drop_km, client_drop_km=
     return round(olt_power - att, 2)
 
 
-def generate_route(start_lat, start_lng, end_lat, end_lng, num_points=4):
-    """Genera coordenadas intermedias realistas entre dos puntos."""
+def generate_route(start_lat, start_lng, end_lat, end_lng, num_points=None):
+    """
+    Genera coordenadas intermedias realistas entre dos puntos.
+
+    Crea trayectorias con mas vertices para que parezcan cables desplegados
+    por calles y aceras. Añade pequenos desvios perpendiculares para romper
+    la linea recta y un punto de paso intermedio que simula rodear una manzana.
+    """
+    import math
+
+    # Distancia aproximada en metros (haversine simplificado)
+    lat_diff = (end_lat - start_lat) * 111000
+    lng_diff = (end_lng - start_lng) * 111000 * math.cos(math.radians(start_lat))
+    distance_m = math.sqrt(lat_diff ** 2 + lng_diff ** 2)
+
+    # Un punto cada ~75 m, minimo 3, maximo 12
+    if num_points is None:
+        num_points = max(3, min(12, int(distance_m / 75)))
+
+    # Punto intermedio desplazado perpendicularmente para simular rodear manzana
+    mid_lat = (start_lat + end_lat) / 2.0
+    mid_lng = (start_lng + end_lng) / 2.0
+    if distance_m > 100:
+        # Vector unitario perpendicular
+        dx = end_lng - start_lng
+        dy = end_lat - start_lat
+        norm = math.sqrt(dx ** 2 + dy ** 2) or 1.0
+        # Desplazamiento proporcional a la distancia (hasta ~15% de la distancia)
+        offset_m = min(random.uniform(15, 40), distance_m * 0.15)
+        offset_lat = (-dx / norm) * (offset_m / 111000)
+        offset_lng = (dy / norm) * (offset_m / (111000 * math.cos(math.radians(mid_lat))))
+        mid_lat += offset_lat
+        mid_lng += offset_lng
+
+    def interpolate(p1, p2, steps):
+        """Interpola steps puntos entre p1 y p2 incluyendo p2 al final."""
+        pts = []
+        for i in range(1, steps + 1):
+            frac = i / steps
+            lat = p1[0] + (p2[0] - p1[0]) * frac
+            lng = p1[1] + (p2[1] - p1[1]) * frac
+            pts.append([lat, lng])
+        return pts
+
     route = [[start_lat, start_lng]]
-    for i in range(1, num_points + 1):
-        frac = i / (num_points + 1)
-        lat = start_lat + (end_lat - start_lat) * frac + random.uniform(-0.0001, 0.0001)
-        lng = start_lng + (end_lng - start_lng) * frac + random.uniform(-0.0001, 0.0001)
-        route.append([round(lat, 6), round(lng, 6)])
-    route.append([end_lat, end_lng])
-    return route
+    # De origen a punto intermedio
+    route.extend(interpolate(route[-1], [mid_lat, mid_lng], num_points // 2 + 1))
+    # De punto intermedio a destino
+    route.extend(interpolate(route[-1], [end_lat, end_lng], num_points // 2 + 1))
+
+    # Añadir ruido realista (hasta ~5 m) a puntos intermedios
+    final_route = [route[0]]
+    for pt in route[1:-1]:
+        noise_lat = random.uniform(-0.000045, 0.000045)
+        noise_lng = random.uniform(-0.000045, 0.000045)
+        final_route.append([round(pt[0] + noise_lat, 6), round(pt[1] + noise_lng, 6)])
+    final_route.append(route[-1])
+
+    return final_route
 
 
 # ============================================================

@@ -93,6 +93,11 @@ class ClientSerializer(serializers.ModelSerializer):
 class CableSegmentSerializer(serializers.ModelSerializer):
     cable_code = serializers.CharField(source='cable.code', read_only=True)
     cable_type = serializers.CharField(source='cable.cable_type', read_only=True)
+    cable_fiber_count = serializers.IntegerField(source='cable.fiber_count', read_only=True)
+    cable_fibers_used = serializers.IntegerField(source='cable.fibers_used', read_only=True)
+    cable_fibers_free = serializers.IntegerField(source='cable.fibers_free', read_only=True)
+    cable_utilization_percent = serializers.FloatField(source='cable.utilization_percent', read_only=True)
+    cable_length_m = serializers.FloatField(source='cable.length_m', read_only=True)
     route_as_list = serializers.ReadOnlyField()
     fiber_numbers_list = serializers.ReadOnlyField()
     origin_name = serializers.SerializerMethodField()

@@ -858,26 +858,47 @@ def topology_view(request):
 @permission_classes([permissions.IsAuthenticated])
 def fiber_trace_view(request):
     """
-    Trace de ruta de fibra desde OLT hasta cliente.
+    Trace de ruta de fibra desde OLT hasta caja o cliente.
     GET /api/fiber-trace/?client_id=45
+    GET /api/fiber-trace/?box_id=12
 
-    Devuelve la cadena completa: OLT -> Feeder(fibra N) -> Empalme -> Distribution(fibra N) -> Splitter -> Drop(fibra N) -> Caja -> Cliente
-    Con potencias en cada nodo y atenuaciones.
+    Devuelve la cadena completa: OLT -> Feeder(fibra N) -> Empalme -> Distribution(fibra N) -> Splitter -> Drop(fibra N) -> Caja -> [Cliente]
+    Con potencias en cada nodo, atenuaciones y coordenadas de ruta.
     """
     client_id = request.query_params.get('client_id')
-    if not client_id:
-        return Response({'error': 'client_id es requerido'}, status=status.HTTP_400_BAD_REQUEST)
+    box_id = request.query_params.get('box_id')
 
-    try:
-        client = Client.objects.select_related('box', 'box__splitter', 'box__splitter__olt', 'box__zone').get(id=client_id, is_active=True)
-    except Client.DoesNotExist:
-        return Response({'error': f'Cliente {client_id} no encontrado'}, status=status.HTTP_404_NOT_FOUND)
+    if not client_id and not box_id:
+        return Response(
+            {'error': 'client_id o box_id es requerido'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
 
-    box = client.box
+    client = None
+    if client_id:
+        try:
+            client = Client.objects.select_related(
+                'box', 'box__splitter', 'box__splitter__olt', 'box__zone'
+            ).get(id=client_id, is_active=True)
+        except Client.DoesNotExist:
+            return Response(
+                {'error': f'Cliente {client_id} no encontrado'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        box = client.box
+    else:
+        try:
+            box = FiberBox.objects.select_related(
+                'splitter', 'splitter__olt', 'zone'
+            ).get(id=box_id, is_active=True)
+        except FiberBox.DoesNotExist:
+            return Response(
+                {'error': f'Caja {box_id} no encontrada'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
     splitter = box.splitter
     olt = splitter.olt
-
-    # 1-2. Construir la cadena: Cliente -> Caja -> Splitter -> Empalme -> OLT
     trace_chain = []
 
     # Nodo 1: OLT
@@ -894,45 +915,46 @@ def fiber_trace_view(request):
         'coordinates': [olt.latitude, olt.longitude] if olt.latitude else None,
     })
 
-    # Buscar tramo feeder (OLT -> Empalme)
+    # Buscar tramo feeder (OLT -> Empalme) que alimente al splitter destino
     feeder_segments = CableSegment.objects.filter(
         segment_type='olt_to_splice',
         is_active=True
-    ).select_related('cable')
+    ).select_related('cable', 'to_splice')
 
     splice = None
     for seg in feeder_segments:
-        if hasattr(seg, 'to_splice') and seg.to_splice:
-            splice = seg.to_splice
-            feeder_loss = seg.attenuation_db if seg.attenuation_db else round(0.4 * (seg.length_m / 1000), 2)
-            trace_chain.append({
-                'step': 2,
-                'element_type': 'feeder_segment',
-                'id': seg.id,
-                'code': seg.cable.code if seg.cable else None,
-                'name': f"Feeder {seg.cable.code if seg.cable else 'N/A'}",
-                'fiber_numbers': seg.fiber_numbers,
-                'length_m': seg.length_m,
-                'power_dbm': round(olt_power - feeder_loss, 2),
-                'attenuation_db': feeder_loss,
-                'cumulative_loss_db': feeder_loss,
-                'coordinates': seg.route_as_list[0] if seg.route_as_list else None,
-                'route': seg.route_as_list,
-            })
-            # Nodo: Empalme
-            splice_power = round(olt_power - feeder_loss, 2)
-            trace_chain.append({
-                'step': 3,
-                'element_type': 'splice_closure',
-                'id': splice.id,
-                'code': splice.code,
-                'name': splice.name,
-                'power_dbm': splice_power,
-                'attenuation_db': 0.5,
-                'cumulative_loss_db': round(feeder_loss + 0.5, 2),
-                'coordinates': [splice.latitude, splice.longitude] if splice.latitude else None,
-            })
-            break
+        if seg.to_splice:
+            # Seleccionar el empalme que alimenta la zona del splitter destino
+            if seg.to_splice.id == splitter.splice_in_id:
+                splice = seg.to_splice
+                feeder_loss = seg.attenuation_db or round(0.4 * (seg.length_m / 1000), 2)
+                trace_chain.append({
+                    'step': 2,
+                    'element_type': 'feeder_segment',
+                    'id': seg.id,
+                    'code': seg.cable.code if seg.cable else None,
+                    'name': f"Feeder {seg.cable.code if seg.cable else 'N/A'}",
+                    'fiber_numbers': seg.fiber_numbers,
+                    'length_m': seg.length_m,
+                    'power_dbm': round(olt_power - feeder_loss, 2),
+                    'attenuation_db': feeder_loss,
+                    'cumulative_loss_db': feeder_loss,
+                    'coordinates': seg.route_as_list[0] if seg.route_as_list else None,
+                    'route': seg.route_as_list,
+                })
+                splice_power = round(olt_power - feeder_loss, 2)
+                trace_chain.append({
+                    'step': 3,
+                    'element_type': 'splice_closure',
+                    'id': splice.id,
+                    'code': splice.code,
+                    'name': splice.name,
+                    'power_dbm': splice_power,
+                    'attenuation_db': 0.5,
+                    'cumulative_loss_db': round(feeder_loss + 0.5, 2),
+                    'coordinates': [splice.latitude, splice.longitude] if splice.latitude else None,
+                })
+                break
 
     # Buscar tramo distribution (Empalme -> Splitter)
     distribution_segments = CableSegment.objects.filter(
@@ -943,7 +965,7 @@ def fiber_trace_view(request):
 
     if distribution_segments.exists():
         seg = distribution_segments.first()
-        dist_loss = seg.attenuation_db if seg.attenuation_db else round(0.4 * (seg.length_m / 1000), 2)
+        dist_loss = seg.attenuation_db or round(0.4 * (seg.length_m / 1000), 2)
         cumulative = trace_chain[-1]['cumulative_loss_db'] if trace_chain else 0
         splitter_input_power = round(olt_power - cumulative - dist_loss, 2)
         trace_chain.append({
@@ -961,7 +983,9 @@ def fiber_trace_view(request):
             'route': seg.route_as_list,
         })
     else:
-        splitter_input_power = round(olt_power - (trace_chain[-1]['cumulative_loss_db'] if trace_chain else 0), 2)
+        splitter_input_power = round(
+            olt_power - (trace_chain[-1]['cumulative_loss_db'] if trace_chain else 0), 2
+        )
 
     # Nodo: Splitter
     splitter_loss = splitter.insertion_loss_db if hasattr(splitter, 'insertion_loss_db') else 17.0
@@ -976,7 +1000,9 @@ def fiber_trace_view(request):
         'power_input_dbm': splitter_input_power,
         'power_output_dbm': splitter_output_power,
         'attenuation_db': splitter_loss,
-        'cumulative_loss_db': round((trace_chain[-1]['cumulative_loss_db'] if trace_chain else 0) + splitter_loss, 2),
+        'cumulative_loss_db': round(
+            (trace_chain[-1]['cumulative_loss_db'] if trace_chain else 0) + splitter_loss, 2
+        ),
         'coordinates': [splitter.latitude, splitter.longitude] if splitter.latitude else None,
     })
 
@@ -989,7 +1015,7 @@ def fiber_trace_view(request):
 
     if drop_segments.exists():
         seg = drop_segments.first()
-        drop_loss = seg.attenuation_db if seg.attenuation_db else round(0.4 * (seg.length_m / 1000), 2)
+        drop_loss = seg.attenuation_db or round(0.4 * (seg.length_m / 1000), 2)
         cumulative = trace_chain[-1]['cumulative_loss_db'] if trace_chain else 0
         box_input_power = round(splitter_output_power - drop_loss, 2)
         trace_chain.append({
@@ -1018,43 +1044,85 @@ def fiber_trace_view(request):
         'name': box.name,
         'power_dbm': round(box_input_power, 2),
         'attenuation_db': 0.3,
-        'cumulative_loss_db': round((trace_chain[-1]['cumulative_loss_db'] if trace_chain else 0) + 0.3, 2),
+        'cumulative_loss_db': round(
+            (trace_chain[-1]['cumulative_loss_db'] if trace_chain else 0) + 0.3, 2
+        ),
         'coordinates': [box.latitude, box.longitude] if box.latitude else None,
     })
 
-    # Nodo final: Cliente
-    trace_chain.append({
-        'step': 8,
-        'element_type': 'client',
-        'id': client.id,
-        'code': client.client_code,
-        'name': client.full_name,
-        'power_expected_dbm': round(box_input_power - 0.5, 2),
-        'power_measured_dbm': client.optical_power_rx,
-        'power_margin_db': round(client.optical_power_rx - (box_input_power - 0.5), 2) if client.optical_power_rx else None,
-        'attenuation_db': 0.5,
-        'cumulative_loss_db': round((trace_chain[-1]['cumulative_loss_db'] if trace_chain else 0) + 0.5, 2),
-        'coordinates': [client.latitude, client.longitude] if client.latitude else None,
-    })
+    # Nodo final opcional: Cliente
+    if client:
+        trace_chain.append({
+            'step': 8,
+            'element_type': 'client',
+            'id': client.id,
+            'code': client.client_code,
+            'name': client.full_name,
+            'power_expected_dbm': round(box_input_power - 0.5, 2),
+            'power_measured_dbm': client.optical_power_rx,
+            'power_margin_db': round(
+                client.optical_power_rx - (box_input_power - 0.5), 2
+            ) if client.optical_power_rx else None,
+            'attenuation_db': 0.5,
+            'cumulative_loss_db': round(
+                (trace_chain[-1]['cumulative_loss_db'] if trace_chain else 0) + 0.5, 2
+            ),
+            'coordinates': [client.latitude, client.longitude] if client.latitude else None,
+        })
 
-    # 5. Calcular potencia en cada nodo y resumen
-    expected_client_power = round(olt_power - trace_chain[-1]['cumulative_loss_db'], 2) if trace_chain else None
+    total_loss = round(trace_chain[-1]['cumulative_loss_db'], 2) if trace_chain else 0
+    expected_end_power = round(olt_power - total_loss, 2)
 
-    return Response({
-        'client': {
+    response_payload = {
+        'trace': trace_chain,
+        'summary': {
+            'olt_output_dbm': olt_power,
+            'total_attenuation_db': total_loss,
+            'status': 'OK',
+        }
+    }
+
+    if client:
+        response_payload['client'] = {
             'id': client.id,
             'client_code': client.client_code,
             'full_name': client.full_name,
             'address': client.address,
             'status': client.status,
-        },
-        'trace': trace_chain,
-        'summary': {
-            'olt_output_dbm': olt_power,
-            'expected_client_dbm': expected_client_power,
-            'measured_client_dbm': client.optical_power_rx,
-            'total_attenuation_db': round(trace_chain[-1]['cumulative_loss_db'], 2) if trace_chain else 0,
-            'power_margin_db': round(client.optical_power_rx - expected_client_power, 2) if client.optical_power_rx and expected_client_power else None,
-            'status': 'OK' if client.optical_power_rx and expected_client_power and client.optical_power_rx > (expected_client_power - 3) else 'DEGRADED' if client.optical_power_rx and expected_client_power and client.optical_power_rx > (expected_client_power - 6) else 'CRITICAL',
         }
-    })
+        response_payload['summary']['expected_client_dbm'] = expected_end_power
+        response_payload['summary']['measured_client_dbm'] = client.optical_power_rx
+        response_payload['summary']['power_margin_db'] = (
+            round(client.optical_power_rx - expected_end_power, 2)
+            if client.optical_power_rx and expected_end_power else None
+        )
+        response_payload['summary']['status'] = (
+            'OK' if client.optical_power_rx and expected_end_power
+            and client.optical_power_rx > (expected_end_power - 3)
+            else 'DEGRADED' if client.optical_power_rx and expected_end_power
+            and client.optical_power_rx > (expected_end_power - 6)
+            else 'CRITICAL'
+        )
+    else:
+        response_payload['box'] = {
+            'id': box.id,
+            'code': box.code,
+            'name': box.name,
+            'address': box.address,
+            'status': box.status,
+        }
+        response_payload['summary']['expected_box_dbm'] = expected_end_power
+        response_payload['summary']['measured_box_dbm'] = box.measured_power_dbm
+        response_payload['summary']['power_margin_db'] = (
+            round(box.measured_power_dbm - expected_end_power, 2)
+            if box.measured_power_dbm and expected_end_power else None
+        )
+        response_payload['summary']['status'] = (
+            'OK' if box.measured_power_dbm and expected_end_power
+            and box.measured_power_dbm > (expected_end_power - 3)
+            else 'DEGRADED' if box.measured_power_dbm and expected_end_power
+            and box.measured_power_dbm > (expected_end_power - 6)
+            else 'CRITICAL'
+        )
+
+    return Response(response_payload)

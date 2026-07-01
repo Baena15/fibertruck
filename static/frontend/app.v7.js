@@ -205,7 +205,40 @@ function Dashboard() {
   ]);
 }
 
+// --- Network map styling constants ---
+var CABLE_STYLE = {
+  feeder: { color: '#dc2626', weight: 5, dashArray: null, label: 'Feeder', desc: 'Central -> Zona' },
+  distribution: { color: '#2563eb', weight: 4, dashArray: null, label: 'Distribution', desc: 'Empalme -> Splitter' },
+  drop: { color: '#16a34a', weight: 2, dashArray: '4,6', label: 'Drop', desc: 'Caja -> Cliente' }
+};
+var SEGMENT_TYPE_LABELS = {
+  'olt_to_splice': 'OLT -> Empalme',
+  'splice_to_splitter': 'Empalme -> Splitter',
+  'splitter_to_box': 'Splitter -> Caja',
+  'splice_to_box': 'Empalme -> Caja',
+  'box_to_client': 'Caja -> Cliente'
+};
+var TRACE_HIGHLIGHT_COLOR = '#a855f7'; // purple for active trace
+
+function pctColor(pct) {
+  if (pct >= 80) return 'bg-red-500';
+  if (pct >= 60) return 'bg-yellow-500';
+  return 'bg-green-500';
+}
+
+function pctText(pct) {
+  if (pct >= 80) return 'text-red-700';
+  if (pct >= 60) return 'text-yellow-700';
+  return 'text-green-700';
+}
+
+function formatNumber(n, decimals) {
+  if (n === null || n === undefined || isNaN(n)) return '-';
+  return Number(n).toFixed(decimals || 0);
+}
+
 function NetworkMap() {
+  // --- State ---
   var s1 = React.useState([]); var segs = s1[0], setSegs = s1[1];
   var s2 = React.useState([]); var boxes = s2[0], setBoxes = s2[1];
   var s3 = React.useState([]); var splices = s3[0], setSplices = s3[1];
@@ -213,82 +246,430 @@ function NetworkMap() {
   var s5 = React.useState([]); var olts = s5[0], setOlts = s5[1];
   var s6 = React.useState({feeder: true, distribution: true, drop: true, boxes: true, splices: true, splitters: true, olt: true});
   var ly = s6[0], setLy = s6[1];
+  var s7 = React.useState(null); var selectedSeg = s7[0], setSelectedSeg = s7[1];
+  var s8 = React.useState(null); var hoveredSegId = s8[0], setHoveredSegId = s8[1];
+  var s9 = React.useState(null); var traceData = s9[0], setTraceData = s9[1];
+  var s10 = React.useState(false); var traceLoading = s10[0], setTraceLoading = s10[1];
+
+  // --- Refs ---
   var mapR = React.useRef(null);
   var lm = React.useRef(null);
-  var lr = React.useRef({});
+  var grRef = React.useRef({});
+  var segLayersRef = React.useRef({});
+  var nodeLayersRef = React.useRef({});
+  var traceLayerRef = React.useRef(null);
 
+  // --- Data loading ---
   React.useEffect(function() {
-    Promise.all([fa('/api/segments/'), fa('/api/boxes/'), fa('/api/splices/'), fa('/api/splitters/'), fa('/api/olts/')]).then(function(r) {
-      setSegs(r[0] || []); setBoxes(r[1] || []); setSplices(r[2] || []); setSplitters(r[3] || []); setOlts(r[4] || []);
+    Promise.all([
+      fa('/api/segments/'), fa('/api/boxes/'), fa('/api/splices/'),
+      fa('/api/splitters/'), fa('/api/olts/')
+    ]).then(function(r) {
+      setSegs(r[0] || []); setBoxes(r[1] || []); setSplices(r[2] || []);
+      setSplitters(r[3] || []); setOlts(r[4] || []);
     });
   }, []);
 
+  // --- Map initialization (once) ---
   React.useEffect(function() {
     if (!lm.current && mapR.current) {
       lm.current = L.map(mapR.current).setView([38.2395, -1.4165], 15);
-      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {attribution: '&copy; OSM', maxZoom: 19}).addTo(lm.current);
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; OSM', maxZoom: 19
+      }).addTo(lm.current);
+
+      // Stable layer groups
+      grRef.current = {
+        feeder: L.layerGroup().addTo(lm.current),
+        distribution: L.layerGroup().addTo(lm.current),
+        drop: L.layerGroup().addTo(lm.current),
+        boxes: L.layerGroup().addTo(lm.current),
+        splices: L.layerGroup().addTo(lm.current),
+        splitters: L.layerGroup().addTo(lm.current),
+        olt: L.layerGroup().addTo(lm.current)
+      };
     }
     return function() {
       if (lm.current) { lm.current.remove(); lm.current = null; }
     };
   }, []);
 
+  // --- Render segments whenever data or visibility changes ---
   React.useEffect(function() {
     if (!lm.current) return;
-    Object.values(lr.current).forEach(function(l) {
-      if (l && lm.current.hasLayer(l)) lm.current.removeLayer(l);
+
+    // Clear previous segment layers
+    Object.values(segLayersRef.current).forEach(function(layer) {
+      Object.values(grRef.current).forEach(function(g) { g.removeLayer(layer); });
     });
-    lr.current = {};
-    var gr = {
-      feeder: L.layerGroup(), distribution: L.layerGroup(), drop: L.layerGroup(),
-      boxes: L.layerGroup(), splices: L.layerGroup(), splitters: L.layerGroup(), olt: L.layerGroup()
-    };
-    if (ly.olt && olts[0]) {
-      var o = olts[0];
-      L.marker([o.latitude, o.longitude], {icon: L.divIcon({className: '', html: '<div style="width:14px;height:14px;background:#dc2626;border:2px solid white;border-radius:50%"></div>', iconSize: [14, 14]})})
-        .addTo(gr.olt).bindPopup('<b>' + o.code + '</b><br/>' + o.output_power_dbm + ' dBm');
-    }
+    segLayersRef.current = {};
+
     (segs || []).forEach(function(sg) {
-      var st = sg.segment_type || 'drop';
-      if (!ly[st]) return;
+      var cableType = sg.cable_type || 'drop';
+      var style = CABLE_STYLE[cableType] || CABLE_STYLE.drop;
       var rt = sg.route_as_list || [];
       if (rt.length < 2) return;
-      var col = CC[st] || '#666';
-      var w = st === 'feeder' ? 4 : st === 'distribution' ? 3 : 2;
-      var ds = st === 'feeder' ? '10,5' : st === 'drop' ? '5,5' : null;
-      L.polyline(rt, {color: col, weight: w, dashArray: ds, opacity: 0.8})
-        .addTo(gr[st]).bindPopup('<b>' + sg.cable_code + '</b><br/>' + st + '<br/>' + sg.length_m + 'm');
+
+      var poly = L.polyline(rt, {
+        color: style.color,
+        weight: style.weight,
+        dashArray: style.dashArray,
+        opacity: 0.8,
+        lineCap: 'round',
+        lineJoin: 'round'
+      });
+
+      // Click: select segment
+      poly.on('click', function(e) {
+        L.DomEvent.stop(e);
+        setSelectedSeg(sg);
+        setTraceData(null);
+      });
+
+      // Hover
+      poly.on('mouseover', function() {
+        setHoveredSegId(sg.id);
+      });
+      poly.on('mouseout', function() {
+        setHoveredSegId(null);
+      });
+
+      poly.bindPopup(buildSegmentPopup(sg));
+      poly.addTo(grRef.current[cableType] || grRef.current.drop);
+      segLayersRef.current[sg.id] = poly;
     });
-    if (ly.splices) {
-      (splices || []).forEach(function(sp) {
-        if (sp.latitude && sp.longitude)
-          L.circleMarker([sp.latitude, sp.longitude], {radius: 6, fillColor: '#111', color: '#fbbf24', weight: 2, fillOpacity: 0.9})
-            .addTo(gr.splices).bindPopup('<b>' + sp.code + '</b><br/>' + (sp.zone_name || '') + '<br/>' + (sp.fibers_free || 0) + ' libres');
-      });
-    }
-    if (ly.splitters) {
-      (splitters || []).forEach(function(s) {
-        if (s.latitude && s.longitude)
-          L.circleMarker([s.latitude, s.longitude], {radius: 8, fillColor: '#f97316', color: '#fff', weight: 2, fillOpacity: 0.9})
-            .addTo(gr.splitters).bindPopup('<b>' + s.code + '</b><br/>1:' + s.ratio);
-      });
-    }
-    if (ly.boxes) {
-      (boxes || []).forEach(function(b) {
-        if (!b.latitude || !b.longitude) return;
-        var col = ZC[b.zone_code] || '#0ea5e9';
-        var aff = (b.affected_count || 0) > 0;
-        L.circleMarker([b.latitude, b.longitude], {radius: aff ? 10 : 6, fillColor: col, color: aff ? '#dc2626' : '#fff', weight: aff ? 3 : 1.5, fillOpacity: aff ? 0.95 : 0.7})
-          .addTo(gr.boxes).bindPopup('<b>' + b.code + '</b><br/>' + (b.name || '') + '<br/>' + (b.client_count || 0) + ' clientes');
-      });
-    }
-    Object.keys(gr).forEach(function(k) {
-      if (ly[k] !== false) { gr[k].addTo(lm.current); lr.current[k] = gr[k]; }
+
+    updateLayerVisibility();
+  }, [segs, ly]);
+
+  // --- Render network nodes whenever data changes ---
+  React.useEffect(function() {
+    if (!lm.current) return;
+
+    // Clear previous node layers
+    Object.values(nodeLayersRef.current).forEach(function(layer) {
+      Object.values(grRef.current).forEach(function(g) { g.removeLayer(layer); });
     });
-  }, [segs, boxes, splices, splitters, olts, ly]);
+    nodeLayersRef.current = {};
+
+    // OLT
+    if (olts[0]) {
+      var o = olts[0];
+      var oltIcon = L.divIcon({
+        className: '',
+        html: '<div style="width:16px;height:16px;background:#dc2626;border:2px solid white;border-radius:50%;box-shadow:0 0 4px rgba(0,0,0,0.4)"></div>',
+        iconSize: [16, 16]
+      });
+      var oltM = L.marker([o.latitude, o.longitude], {icon: oltIcon})
+        .bindPopup('<b>' + o.code + '</b><br/>' + o.name + '<br/>Salida: ' + (o.output_power_dbm || '-') + ' dBm');
+      oltM.addTo(grRef.current.olt);
+      nodeLayersRef.current['olt-' + o.id] = oltM;
+    }
+
+    // Splices
+    (splices || []).forEach(function(sp) {
+      if (!sp.latitude || !sp.longitude) return;
+      var m = L.circleMarker([sp.latitude, sp.longitude], {
+        radius: 7, fillColor: '#111', color: '#fbbf24', weight: 2, fillOpacity: 0.95
+      }).bindPopup('<b>' + sp.code + '</b><br/>' + (sp.name || '') + '<br/>' + (sp.zone_name || '') + '<br/>Capacidad: ' + (sp.fiber_capacity || '-') + 'f | ' + (sp.fibers_free || 0) + ' libres');
+      m.addTo(grRef.current.splices);
+      nodeLayersRef.current['splice-' + sp.id] = m;
+    });
+
+    // Splitters
+    (splitters || []).forEach(function(s) {
+      if (!s.latitude || !s.longitude) return;
+      var m = L.circleMarker([s.latitude, s.longitude], {
+        radius: 9, fillColor: '#f97316', color: '#fff', weight: 2, fillOpacity: 0.95
+      }).bindPopup('<b>' + s.code + '</b><br/>' + (s.name || '') + '<br/>Ratio 1:' + (s.ratio ? s.ratio.split('x')[1] : '-') + '<br/>Entrada: ' + (s.input_cable_code || '-') + '<br/>Puertos: ' + (s.occupied_ports || 0) + '/' + (s.total_ports || 0));
+      m.addTo(grRef.current.splitters);
+      nodeLayersRef.current['splitter-' + s.id] = m;
+    });
+
+    // Boxes
+    (boxes || []).forEach(function(b) {
+      if (!b.latitude || !b.longitude) return;
+      var col = ZC[b.zone_code] || '#0ea5e9';
+      var aff = (b.affected_count || 0) > 0;
+      var m = L.circleMarker([b.latitude, b.longitude], {
+        radius: aff ? 11 : 7,
+        fillColor: col,
+        color: aff ? '#dc2626' : '#fff',
+        weight: aff ? 3 : 2,
+        fillOpacity: aff ? 0.95 : 0.8
+      });
+      m.bindTooltip(buildBoxPopup(b), {direction: 'top', offset: [0, -6]});
+      m.on('click', function() {
+        fetchTraceForBox(b.id);
+      });
+      m.addTo(grRef.current.boxes);
+      nodeLayersRef.current['box-' + b.id] = m;
+    });
+
+    updateLayerVisibility();
+  }, [boxes, splices, splitters, olts]);
+
+  // --- Update visibility of stable groups ---
+  function updateLayerVisibility() {
+    if (!lm.current) return;
+    Object.keys(grRef.current).forEach(function(k) {
+      var g = grRef.current[k];
+      if (ly[k]) {
+        if (!lm.current.hasLayer(g)) lm.current.addLayer(g);
+      } else {
+        if (lm.current.hasLayer(g)) lm.current.removeLayer(g);
+      }
+    });
+  }
+
+  React.useEffect(updateLayerVisibility, [ly]);
+
+  // --- Hover effect on segments ---
+  React.useEffect(function() {
+    Object.keys(segLayersRef.current).forEach(function(id) {
+      var layer = segLayersRef.current[id];
+      var sg = (segs || []).find(function(s) { return s.id == id; });
+      if (!sg) return;
+      var cableType = sg.cable_type || 'drop';
+      var style = CABLE_STYLE[cableType] || CABLE_STYLE.drop;
+      var isSelected = selectedSeg && selectedSeg.id == id;
+      var isHovered = hoveredSegId == id;
+      layer.setStyle({
+        weight: isSelected || isHovered ? style.weight + 3 : style.weight,
+        opacity: isSelected ? 1.0 : isHovered ? 0.95 : 0.8,
+        color: isSelected ? '#000' : style.color
+      });
+      if (isSelected) layer.bringToFront();
+    });
+  }, [hoveredSegId, selectedSeg, segs]);
+
+  // --- Active fiber trace highlighting ---
+  React.useEffect(function() {
+    if (!lm.current) return;
+    if (traceLayerRef.current) {
+      lm.current.removeLayer(traceLayerRef.current);
+      traceLayerRef.current = null;
+    }
+    if (!traceData || !traceData.trace) return;
+
+    var traceRoutes = [];
+    traceData.trace.forEach(function(step) {
+      if (step.route && step.route.length >= 2) {
+        traceRoutes.push(step.route);
+      }
+    });
+
+    if (traceRoutes.length > 0) {
+      traceLayerRef.current = L.layerGroup();
+      traceRoutes.forEach(function(route) {
+        L.polyline(route, {
+          color: TRACE_HIGHLIGHT_COLOR,
+          weight: 6,
+          opacity: 0.7,
+          lineCap: 'round',
+          lineJoin: 'round'
+        }).addTo(traceLayerRef.current);
+      });
+      traceLayerRef.current.addTo(lm.current);
+    }
+  }, [traceData]);
+
+  function fetchTraceForBox(boxId) {
+    setTraceLoading(true);
+    setSelectedSeg(null);
+    fa('/api/fiber-trace/?box_id=' + boxId).then(function(d) {
+      setTraceData(d);
+      setTraceLoading(false);
+    }).catch(function() {
+      setTraceLoading(false);
+    });
+  }
+
+  function fetchTraceForClient(clientId) {
+    setTraceLoading(true);
+    setSelectedSeg(null);
+    fa('/api/fiber-trace/?client_id=' + clientId).then(function(d) {
+      setTraceData(d);
+      setTraceLoading(false);
+    }).catch(function() {
+      setTraceLoading(false);
+    });
+  }
+
+  function buildSegmentPopup(sg) {
+    var typeLabel = SEGMENT_TYPE_LABELS[sg.segment_type] || sg.segment_type;
+    return '<b>' + (sg.cable_code || '-') + '</b><br/>' + typeLabel + '<br/>' + formatNumber(sg.length_m, 0) + 'm | ' + formatNumber(sg.attenuation_db, 2) + 'dB';
+  }
+
+  function buildBoxPopup(b) {
+    return '<b>' + b.code + '</b><br/>' + (b.name || '') + '<br/>' + (b.client_count || 0) + ' clientes' +
+      '<br/>Fibra: ' + (b.input_fiber_number || '-') + ' de ' + (b.input_cable_code || '-') +
+      '<br/>PWR esperada: ' + formatNumber(b.expected_power_dbm, 2) + ' dBm';
+  }
 
   function toggleLayer(k) {
     setLy(function(p) { var n = {}; Object.keys(p).forEach(function(key) { n[key] = p[key]; }); n[k] = !p[k]; return n; });
+  }
+
+  function clearSelection() {
+    setSelectedSeg(null);
+    setTraceData(null);
+    if (traceLayerRef.current && lm.current) {
+      lm.current.removeLayer(traceLayerRef.current);
+      traceLayerRef.current = null;
+    }
+  }
+
+  // --- Segment detail panel ---
+  function SegmentDetailPanel() {
+    if (!selectedSeg) return null;
+    var sg = selectedSeg;
+    var cableType = sg.cable_type || 'drop';
+    var style = CABLE_STYLE[cableType] || CABLE_STYLE.drop;
+    var typeLabel = SEGMENT_TYPE_LABELS[sg.segment_type] || sg.segment_type;
+    var used = sg.cable_fibers_used || 0;
+    var total = sg.cable_fiber_count || 0;
+    var free = sg.cable_fibers_free || 0;
+    var pct = sg.cable_utilization_percent || 0;
+    var traceTargetId = null;
+    var traceTargetType = null;
+    if (sg.segment_type === 'splitter_to_box' && sg.to_box) { traceTargetId = sg.to_box; traceTargetType = 'box'; }
+    else if (sg.segment_type === 'box_to_client' && sg.to_client) { traceTargetId = sg.to_client; traceTargetType = 'client'; }
+
+    return ce('div', {className: 'absolute top-4 right-4 w-80 max-h-[70vh] overflow-y-auto bg-white rounded-xl shadow-xl border border-gray-200 z-[1000] p-4'}, [
+      ce('div', {className: 'flex items-start justify-between mb-3'}, [
+        ce('div', null, [
+          ce('h3', {className: 'font-bold text-gray-800'}, [sg.cable_code || 'Tramo de cable']),
+          ce('span', {className: 'inline-block mt-1 px-2 py-0.5 rounded text-xs font-semibold text-white', style: {background: style.color}}, [style.label])
+        ]),
+        ce('button', {onClick: clearSelection, className: 'text-gray-400 hover:text-gray-700 text-xl leading-none'}, ['×'])
+      ]),
+      ce('p', {className: 'text-sm text-gray-500 mb-4'}, [typeLabel]),
+
+      // Capacity
+      ce('div', {className: 'mb-4 p-3 bg-gray-50 rounded-lg'}, [
+        ce('div', {className: 'flex justify-between text-sm mb-1'}, [
+          ce('span', {className: 'text-gray-600'}, ['Capacidad']),
+          ce('span', {className: 'font-mono font-semibold'}, [total + ' fibras'])
+        ]),
+        ce('div', {className: 'flex justify-between text-sm mb-1'}, [
+          ce('span', {className: 'text-gray-600'}, ['Usadas / Libres']),
+          ce('span', {className: 'font-mono font-semibold'}, [used + ' / ' + free])
+        ]),
+        ce('div', {className: 'flex items-center gap-2 mt-2'}, [
+          ce('div', {className: 'flex-1 h-2 bg-gray-200 rounded-full overflow-hidden'}, [
+            ce('div', {className: 'h-2 rounded-full ' + pctColor(pct), style: {width: Math.min(pct, 100) + '%'}})
+          ]),
+          ce('span', {className: 'text-xs font-semibold ' + pctText(pct)}, [formatNumber(pct, 1) + '%'])
+        ])
+      ]),
+
+      // Engineering data
+      ce('div', {className: 'space-y-2 mb-4'}, [
+        ce('div', {className: 'flex justify-between text-sm border-b pb-1'}, [
+          ce('span', {className: 'text-gray-500'}, ['Longitud']),
+          ce('span', {className: 'font-mono'}, [formatNumber(sg.length_m, 1) + ' m'])
+        ]),
+        ce('div', {className: 'flex justify-between text-sm border-b pb-1'}, [
+          ce('span', {className: 'text-gray-500'}, ['Atenuacion']),
+          ce('span', {className: 'font-mono'}, [formatNumber(sg.attenuation_db, 2) + ' dB'])
+        ]),
+        ce('div', {className: 'flex justify-between text-sm border-b pb-1'}, [
+          ce('span', {className: 'text-gray-500'}, ['Fibras del tramo']),
+          ce('span', {className: 'font-mono'}, [(sg.fiber_numbers || '-')])
+        ]),
+        ce('div', {className: 'flex justify-between text-sm border-b pb-1'}, [
+          ce('span', {className: 'text-gray-500'}, ['Origen']),
+          ce('span', {className: 'font-mono text-right'}, [sg.origin_name || '-'])
+        ]),
+        ce('div', {className: 'flex justify-between text-sm border-b pb-1'}, [
+          ce('span', {className: 'text-gray-500'}, ['Destino']),
+          ce('span', {className: 'font-mono text-right'}, [sg.destination_name || '-'])
+        ])
+      ]),
+
+      // Trace action
+      traceTargetId ? ce('button', {
+        onClick: function() {
+          if (traceTargetType === 'box') fetchTraceForBox(traceTargetId);
+          else if (traceTargetType === 'client') fetchTraceForClient(traceTargetId);
+        },
+        className: 'w-full py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-sm font-semibold'
+      }, ['Ver traza de fibra OLT -> ' + (traceTargetType === 'client' ? 'Cliente' : 'Caja')]) : null,
+
+      sg.notes ? ce('p', {className: 'mt-3 text-xs text-gray-400'}, [sg.notes]) : null
+    ]);
+  }
+
+  // --- Active trace panel ---
+  function TracePanel() {
+    if (traceLoading) return ce('div', {className: 'absolute bottom-4 left-4 bg-white rounded-lg shadow-lg border p-3 z-[1000] text-sm'}, ['Calculando traza...']);
+    if (!traceData || !traceData.trace) return null;
+
+    var summary = traceData.summary || {};
+    var target = traceData.box || traceData.client;
+    var title = target ? (target.code + ' - ' + (target.name || '')) : 'Traza de fibra';
+
+    return ce('div', {className: 'absolute bottom-4 left-4 w-80 max-h-[50vh] overflow-y-auto bg-white rounded-xl shadow-xl border border-gray-200 z-[1000] p-4'}, [
+      ce('div', {className: 'flex items-start justify-between mb-2'}, [
+        ce('h3', {className: 'font-bold text-gray-800 text-sm'}, ['Traza: OLT -> ' + (target ? target.code : '')]),
+        ce('button', {onClick: clearSelection, className: 'text-gray-400 hover:text-gray-700 text-xl leading-none'}, ['×'])
+      ]),
+      ce('div', {className: 'mb-3 p-2 bg-purple-50 rounded border border-purple-100'}, [
+        ce('div', {className: 'flex justify-between text-xs'}, [
+          ce('span', {className: 'text-gray-600'}, ['Atenuacion total']),
+          ce('span', {className: 'font-mono font-bold text-purple-700'}, [formatNumber(summary.total_attenuation_db, 2) + ' dB'])
+        ]),
+        summary.expected_box_dbm || summary.expected_client_dbm ? ce('div', {className: 'flex justify-between text-xs mt-1'}, [
+          ce('span', {className: 'text-gray-600'}, ['PWR esperada']),
+          ce('span', {className: 'font-mono font-bold'}, [formatNumber(summary.expected_box_dbm || summary.expected_client_dbm, 2) + ' dBm'])
+        ]) : null
+      ]),
+      ce('div', {className: 'space-y-1'}, traceData.trace.map(function(step, idx) {
+        var icon = step.element_type === 'olt' ? '🏢' : step.element_type === 'splice_closure' ? '🔌' : step.element_type === 'splitter' ? '⚡' : step.element_type === 'fiber_box' ? '📦' : step.element_type === 'client' ? '🏠' : '🔌';
+        return ce('div', {key: idx, className: 'flex items-center text-xs py-1 border-b border-gray-50 last:border-0'}, [
+          ce('span', {className: 'w-5 text-center'}, [icon]),
+          ce('div', {className: 'flex-1 ml-1'}, [
+            ce('p', {className: 'font-semibold text-gray-700'}, [step.code]),
+            step.length_m ? ce('p', {className: 'text-gray-400'}, [formatNumber(step.length_m, 0) + 'm | -' + formatNumber(step.attenuation_db, 2) + 'dB']) : null
+          ]),
+          ce('span', {className: 'font-mono text-gray-500'}, [formatNumber(step.power_dbm, 2) + ' dBm'])
+        ]);
+      }))
+    ]);
+  }
+
+  // --- Legend ---
+  function MapLegend() {
+    return ce('div', {className: 'absolute bottom-4 right-4 bg-white/90 backdrop-blur rounded-lg shadow border p-3 z-[1000] text-xs'}, [
+      ce('h4', {className: 'font-bold text-gray-700 mb-2'}, ['Leyenda']),
+      Object.keys(CABLE_STYLE).map(function(k) {
+        var s = CABLE_STYLE[k];
+        var lineStyle = s.dashArray
+          ? {borderTop: '2px dashed ' + s.color, width: '24px', marginTop: '2px'}
+          : {background: s.color, width: '24px', height: '3px'};
+        return ce('div', {key: k, className: 'flex items-center gap-2 mb-1'}, [
+          ce('div', {style: lineStyle}),
+          ce('span', {className: 'text-gray-600'}, [s.label])
+        ]);
+      }),
+      ce('div', {className: 'flex items-center gap-2 mt-2 pt-2 border-t'}, [
+        ce('div', {className: 'w-2 h-2 rounded-full bg-red-600 border border-white'}),
+        ce('span', {className: 'text-gray-600'}, ['OLT'])
+      ]),
+      ce('div', {className: 'flex items-center gap-2 mt-1'}, [
+        ce('div', {className: 'w-2 h-2 rounded-full bg-orange-500 border border-white'}),
+        ce('span', {className: 'text-gray-600'}, ['Splitter'])
+      ]),
+      ce('div', {className: 'flex items-center gap-2 mt-1'}, [
+        ce('div', {className: 'w-2 h-2 rounded-full bg-black border border-yellow-400'}),
+        ce('span', {className: 'text-gray-600'}, ['Empalme'])
+      ]),
+      ce('div', {className: 'flex items-center gap-2 mt-1'}, [
+        ce('div', {className: 'w-2 h-2 rounded-full bg-blue-500 border border-white'}),
+        ce('span', {className: 'text-gray-600'}, ['Caja CTO'])
+      ])
+    ]);
   }
 
   var layerBtns = [
@@ -310,7 +691,12 @@ function NetworkMap() {
         className: 'px-3 py-1 rounded-lg text-xs font-medium border ' + (ly[k] ? c : 'bg-gray-50 text-gray-400')
       }, [(ly[k] ? '✓ ' : '✗ ') + l]);
     })),
-    ce('div', {ref: mapR, style: {height: '75vh'}, className: 'bg-white rounded-xl shadow-sm border'})
+    ce('div', {className: 'relative'}, [
+      ce('div', {ref: mapR, style: {height: '75vh'}, className: 'bg-white rounded-xl shadow-sm border relative'}),
+      ce(SegmentDetailPanel),
+      ce(TracePanel),
+      ce(MapLegend)
+    ])
   ]);
 }
 
