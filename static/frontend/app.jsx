@@ -216,4 +216,5 @@ function App(){
   const rt=()=>{switch(at){case'dashboard':return React.createElement(Dashboard);case'map':return React.createElement(NetworkMap);case'topology':return React.createElement(Topology);case'diagnose':return React.createElement(DiagnoseV2);case'simulate':return React.createElement(Simulate);default:return React.createElement(Dashboard)}};
   return React.createElement('div',{className:'min-h-screen bg-gray-100'},React.createElement(Header,{activeTab:at,setActiveTab:setAt}),React.createElement('main',null,rt()),React.createElement('footer',{className:'bg-gray-800 text-gray-400 text-center py-3 text-xs mt-8'},'FiberTruck v2.0 - TFM Master Full Stack | Cieza, Murcia'));
 }
-ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App));
+// Use ReactDOM.render for UMD compatibility
+ReactDOM.render(React.createElement(App),document.getElementById('root'));
