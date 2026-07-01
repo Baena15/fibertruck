@@ -1,1 +1,1 @@
-web: python manage.py migrate --run-syncdb && python manage.py auto_setup && gunicorn fibertruck.wsgi:application --bind 0.0.0.0:$PORT
+web: echo "=== Running migrations ===" && python manage.py migrate && echo "=== Running auto_setup ===" && python manage.py auto_setup && echo "=== Starting gunicorn ===" && gunicorn fibertruck.wsgi:application --bind 0.0.0.0:$PORT
