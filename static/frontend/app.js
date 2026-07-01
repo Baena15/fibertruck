@@ -456,7 +456,7 @@ function DiagnoseV2() {
       ce('div', {className: 'flex-1 h-1 ' + (step > 1 ? 'bg-green-500' : 'bg-gray-200')}),
       ce('div', {className: 'w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold ' + (step > 2 ? 'bg-green-500 text-white' : step === 2 ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-500')}, [step > 2 ? '✓' : '2']),
       ce('span', {className: 'text-xs hidden md:inline'}, ['Afectados']),
-      ce('div', {className: 'flex-1 h-1 ' + (step > 2 ? 'bg-green-500' : 'bg-gray-200')}),
+      ce('div', {className: 'flex-1 h-1 ' + (step > 2 ? 'bg-green-500' : 'bg-gray-200')})),
       ce('div', {className: 'w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold ' + (step === 3 ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-500')}, ['3']),
       ce('span', {className: 'text-xs hidden md:inline'}, ['Resultado'])
     ]),
@@ -602,7 +602,7 @@ function App() {
       case 'dashboard': return ce(Dashboard);
       case 'map': return ce(NetworkMap);
       case 'topology': return ce(Topology);
-      case 'diagnose': return ce(DagnoseV2);
+      case 'diagnose': return ce(DiagnoseV2);
       case 'simulate': return ce(Simulate);
       default: return ce(Dashboard);
     }
@@ -615,4 +615,13 @@ function App() {
   ]);
 }
 
-ReactDOM.render(React.createElement(App), document.getElementById('root'));
+// React 18 createRoot API
+var rootEl = document.getElementById('root');
+if (rootEl && typeof ReactDOM !== 'undefined' && ReactDOM.createRoot) {
+  var root = ReactDOM.createRoot(rootEl);
+  root.render(React.createElement(App));
+} else if (rootEl && typeof ReactDOM !== 'undefined' && ReactDOM.render) {
+  ReactDOM.render(React.createElement(App), rootEl);
+} else {
+  rootEl.innerHTML = '<div style="padding:40px;text-align:center;font-family:sans-serif;"><h2 style="color:#dc2626">Error de carga</h2><p>No se pudieron cargar las librerias React. Verifica tu conexion a internet.</p><p style="color:#666;font-size:12px;margin-top:20px">React: ' + (typeof React) + ' | ReactDOM: ' + (typeof ReactDOM) + '</p></div>';
+}
