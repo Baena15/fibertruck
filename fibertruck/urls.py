@@ -4,42 +4,57 @@ FiberTruck main URLs
 from django.contrib import admin
 from django.urls import path, include
 from django.conf import settings
-from django.http import FileResponse, HttpResponse
+from django.http import HttpResponse
 import os
-import mimetypes
-
-
-def _serve_static_file(request, relative_path):
-    """Serve a file from static or staticfiles dirs."""
-    # Try source static dir first
-    file_path = os.path.join(settings.BASE_DIR, 'static', relative_path)
-    if not os.path.exists(file_path):
-        # Fallback to collected staticfiles
-        file_path = os.path.join(settings.STATIC_ROOT, relative_path)
-    if os.path.exists(file_path) and os.path.isfile(file_path):
-        content_type, _ = mimetypes.guess_type(file_path)
-        if content_type is None:
-            content_type = 'application/octet-stream'
-        response = FileResponse(open(file_path, 'rb'), content_type=content_type)
-        return response
-    return HttpResponse(f'Not found: {relative_path}', status=404)
 
 
 def serve_index(request):
     """Serve the static index.html for the React frontend."""
-    return _serve_static_file(request, 'frontend/index.html')
+    # Try multiple possible locations
+    possible_paths = [
+        os.path.join(settings.BASE_DIR, 'static', 'frontend', 'index.html'),
+        os.path.join(settings.BASE_DIR, 'staticfiles', 'frontend', 'index.html'),
+        os.path.join('/app', 'static', 'frontend', 'index.html'),
+        os.path.join('/app', 'staticfiles', 'frontend', 'index.html'),
+    ]
+    for file_path in possible_paths:
+        if os.path.exists(file_path):
+            with open(file_path, 'r') as f:
+                return HttpResponse(f.read(), content_type='text/html')
+    # Fallback: return inline HTML
+    return HttpResponse('''<!DOCTYPE html>
+<html lang="es"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FiberTruck - Diagnostico FTTH Cieza</title>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://cdn.tailwindcss.com"></script>
+<style>.severity-critical{border-left:4px solid #dc2626;background:#fef2f2;}.severity-high{border-left:4px solid #f59e0b;background:#fffbeb;}.severity-medium{border-left:4px solid #3b82f6;background:#eff6ff;}</style>
+</head><body class="bg-gray-100"><div id="root"></div>
+<script type="text/javascript" src="/static/frontend/app.jsx"></script>
+</body></html>''', content_type='text/html')
 
 
 def serve_app_jsx(request):
     """Serve the React app.jsx file."""
-    return _serve_static_file(request, 'frontend/app.jsx')
+    possible_paths = [
+        os.path.join(settings.BASE_DIR, 'static', 'frontend', 'app.jsx'),
+        os.path.join(settings.BASE_DIR, 'staticfiles', 'frontend', 'app.jsx'),
+        os.path.join('/app', 'static', 'frontend', 'app.jsx'),
+        os.path.join('/app', 'staticfiles', 'frontend', 'app.jsx'),
+    ]
+    for file_path in possible_paths:
+        if os.path.exists(file_path):
+            with open(file_path, 'r') as f:
+                return HttpResponse(f.read(), content_type='application/javascript')
+    return HttpResponse('// app.jsx not found', content_type='application/javascript', status=404)
 
 
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/', include('core.urls')),
     path('api/', include('network.urls')),
-    # Serve frontend files directly (no whitenoise dependency for these)
     path('static/frontend/app.jsx', serve_app_jsx),
     path('', serve_index, name='frontend'),
 ]
