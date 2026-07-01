@@ -1,16 +1,21 @@
 """
 WSGI config for fibertruck project.
-
-It exposes the WSGI callable as a module-level variable named ``application``.
-
-For more information on this file, see
-https://docs.djangoproject.com/en/6.0/howto/deployment/wsgi/
+Runs migrate + auto_setup before serving requests (Railway compatible).
 """
-
 import os
-
-from django.core.wsgi import get_wsgi_application
 
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'fibertruck.settings')
 
+# Run migrations and auto-setup before creating the WSGI application
+import django
+django.setup()
+
+from django.core.management import call_command
+try:
+    call_command('migrate', verbosity=0)
+    call_command('auto_setup', verbosity=0)
+except Exception:
+    pass  # Continue even if setup fails (e.g., DB already configured)
+
+from django.core.wsgi import get_wsgi_application
 application = get_wsgi_application()
