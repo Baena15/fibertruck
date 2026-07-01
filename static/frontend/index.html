@@ -26,9 +26,18 @@
     .pulse-marker { animation: pulse 2s infinite; }
     @keyframes pulse { 0% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.5); opacity: 0.7; } 100% { transform: scale(1); opacity: 1; } }
     .diagnosis-card { transition: all 0.3s ease; }
-    .severity-critical { border-left: 4px solid #dc2626; background: #fee2e2; }
-    .severity-high { border-left: 4px solid #f59e0b; background: #fef3c7; }
-    .severity-medium { border-left: 4px solid #3b82f6; background: #dbeafe; }
+    .severity-critical { border-left: 4px solid #dc2626; background: #fef2f2; }
+    .severity-high { border-left: 4px solid #f59e0b; background: #fffbeb; }
+    .severity-medium { border-left: 4px solid #3b82f6; background: #eff6ff; }
+    .severity-low { border-left: 4px solid #10b981; background: #ecfdf5; }
+    .power-bar-bg { background: #e5e7eb; height: 20px; border-radius: 4px; }
+    .power-bar-fill { height: 100%; border-radius: 4px; transition: width 0.5s; }
+    .cable-feeder { stroke: #dc2626; stroke-width: 4; stroke-dasharray: 10,5; }
+    .cable-distribution { stroke: #2563eb; stroke-width: 3; }
+    .cable-drop { stroke: #16a34a; stroke-width: 2; stroke-dasharray: 5,5; }
+    .topology-tree { font-family: monospace; }
+    .topology-tree .expand-btn { cursor: pointer; user-select: none; }
+    .step-number { width: 28px; height: 28px; border-radius: 50%; background: #0ea5e9; color: white; display: flex; align-items: center; justify-content: center; font-weight: bold; flex-shrink: 0; }
   </style>
 </head>
 <body class="bg-gray-100">
