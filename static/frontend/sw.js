@@ -2,7 +2,7 @@
  * FiberTrack Service Worker
  * Estrategia: cache-first para assets de app shell, network-only para API.
  */
-const CACHE_NAME = 'fibertrack-v1';
+const CACHE_NAME = 'fibertrack-v2';
 const PRECACHE_ASSETS = [
   '/',
   '/static/frontend/app.v9.js',

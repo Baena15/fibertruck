@@ -362,7 +362,7 @@ function Topology() {
   var zc = topo.zones || [];
   var totalBoxes = zc.reduce(function(s, z) { return s + (z.boxes && z.boxes.length || 0); }, 0);
   var totalClients = zc.reduce(function(s, z) { return s + (z.zone && z.zone.client_count || 0); }, 0);
-  var totalCables = zc.reduce(function(s, z) { return s + (z.cables && z.cables.length || 0); }, 0);
+  var totalCables = topo.summary && topo.summary.total_cables || 0;
 
   return ce('div', {className: 'max-w-7xl mx-auto px-4 py-6 space-y-6'}, [
     ce('div', {className: 'grid grid-cols-5 gap-3'}, [

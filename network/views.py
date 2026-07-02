@@ -122,11 +122,13 @@ class OLTViewSet(viewsets.ModelViewSet):
     queryset = OLT.objects.all()
     serializer_class = OLTSerializer
     permission_classes = [IsSupervisor]
+    pagination_class = None
 
 
 class ZoneViewSet(viewsets.ModelViewSet):
     queryset = Zone.objects.all()
     serializer_class = ZoneSerializer
+    pagination_class = None
     def get_permissions(self):
         if self.action in ['list', 'retrieve']:
             return [permissions.IsAuthenticated()]
@@ -136,6 +138,7 @@ class ZoneViewSet(viewsets.ModelViewSet):
 class SplitterViewSet(viewsets.ModelViewSet):
     queryset = Splitter.objects.all()
     serializer_class = SplitterSerializer
+    pagination_class = None
     def get_permissions(self):
         if self.action in ['list', 'retrieve']:
             return [permissions.IsAuthenticated()]
@@ -153,6 +156,7 @@ class SplitterViewSet(viewsets.ModelViewSet):
 class FiberBoxViewSet(viewsets.ModelViewSet):
     queryset = FiberBox.objects.all()
     serializer_class = FiberBoxSerializer
+    pagination_class = None
     def get_permissions(self):
         if self.action in ['list', 'retrieve', 'search', 'clients', 'hierarchy']:
             return [permissions.IsAuthenticated()]
@@ -208,6 +212,7 @@ class FiberBoxViewSet(viewsets.ModelViewSet):
 class ClientViewSet(viewsets.ModelViewSet):
     queryset = Client.objects.all()
     serializer_class = ClientSerializer
+    pagination_class = None
     def get_permissions(self):
         if self.action in ['list', 'retrieve', 'by_zone', 'by_box', 'affected']:
             return [permissions.IsAuthenticated()]
@@ -309,6 +314,7 @@ class ClientViewSet(viewsets.ModelViewSet):
 class FiberIncidentViewSet(viewsets.ModelViewSet):
     queryset = FiberIncident.objects.all()
     serializer_class = FiberIncidentSerializer
+    pagination_class = None
     def get_permissions(self):
         if self.action in ['list', 'retrieve', 'open', 'stats']:
             return [permissions.IsAuthenticated()]
@@ -345,6 +351,7 @@ class FiberCableViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = FiberCable.objects.all()
     serializer_class = FiberCableSerializer
     permission_classes = [permissions.IsAuthenticated]
+    pagination_class = None  # El dashboard necesita la lista completa
 
     @action(detail=False, methods=['get'])
     def by_type(self, request):
@@ -377,6 +384,7 @@ class SpliceClosureViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = SpliceClosure.objects.all()
     serializer_class = SpliceClosureSerializer
     permission_classes = [permissions.IsAuthenticated]
+    pagination_class = None
 
     @action(detail=False, methods=['get'])
     def by_zone(self, request):
@@ -396,6 +404,7 @@ class CableSegmentViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = CableSegment.objects.all()
     serializer_class = CableSegmentSerializer
     permission_classes = [permissions.IsAuthenticated]
+    pagination_class = None
 
     @action(detail=False, methods=['get'])
     def by_zone(self, request):
@@ -437,6 +446,7 @@ class FiberAssignmentViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = FiberAssignment.objects.all()
     serializer_class = FiberAssignmentSerializer
     permission_classes = [permissions.IsAuthenticated]
+    pagination_class = None
 
     @action(detail=False, methods=['get'])
     def by_cable(self, request):
