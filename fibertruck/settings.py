@@ -25,6 +25,7 @@ INSTALLED_APPS = [
     'corsheaders',
     'core',
     'network',
+    'tickets',
 ]
 
 MIDDLEWARE = [
@@ -65,11 +66,11 @@ DATABASE_URL = os.environ.get('DATABASE_URL')
 if DATABASE_URL:
     DATABASES = {'default': dj_database_url.config(default=DATABASE_URL, conn_max_age=600, ssl_require=True)}
 else:
-    # Use /tmp for SQLite in containerized environments (writable)
+    # Use local SQLite for development (portable across Windows/Linux/macOS)
     DATABASES = {
         'default': {
             'ENGINE': 'django.db.backends.sqlite3',
-            'NAME': '/tmp/fibertruck.db',
+            'NAME': BASE_DIR / 'db.sqlite3',
         }
     }
 

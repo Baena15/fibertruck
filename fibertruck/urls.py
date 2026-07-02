@@ -18,50 +18,57 @@ def serve_index(request):
     ]
     for file_path in possible_paths:
         if os.path.exists(file_path):
-            with open(file_path, 'r') as f:
+            with open(file_path, 'r', encoding='utf-8') as f:
                 return HttpResponse(f.read(), content_type='text/html')
-    # Fallback: return inline HTML with app.v7.js reference
+    # Fallback: return inline HTML with app.v9.js reference
     return HttpResponse('''<!DOCTYPE html>
 <html lang="es"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>FiberTruck - Diagnostico FTTH Cieza</title>
+<title>FiberTrack - Diagnostico FTTH + Gestion de incidencias Cieza</title>
 <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <script src="https://cdn.tailwindcss.com"></script>
 </head><body class="bg-gray-100"><div id="root"></div>
-<script type="text/javascript" src="/static/frontend/app.v7.js"></script>
+<script type="text/javascript" src="/static/frontend/app.v9.js"></script>
 </body></html>''', content_type='text/html')
 
 
-def serve_app_v7(request):
-    """Serve the React app.v7.js file."""
+def serve_app_v9(request):
+    """Serve the React app.v9.js file."""
     possible_paths = [
-        os.path.join(settings.BASE_DIR, 'static', 'frontend', 'app.v7.js'),
-        os.path.join(settings.BASE_DIR, 'staticfiles', 'frontend', 'app.v7.js'),
-        os.path.join('/app', 'static', 'frontend', 'app.v7.js'),
-        os.path.join('/app', 'staticfiles', 'frontend', 'app.v7.js'),
+        os.path.join(settings.BASE_DIR, 'static', 'frontend', 'app.v9.js'),
+        os.path.join(settings.BASE_DIR, 'staticfiles', 'frontend', 'app.v9.js'),
+        os.path.join('/app', 'static', 'frontend', 'app.v9.js'),
+        os.path.join('/app', 'staticfiles', 'frontend', 'app.v9.js'),
     ]
     for file_path in possible_paths:
         if os.path.exists(file_path):
-            with open(file_path, 'r') as f:
+            with open(file_path, 'r', encoding='utf-8') as f:
                 return HttpResponse(f.read(), content_type='application/javascript')
-    return HttpResponse('// app.v7.js not found', content_type='application/javascript', status=404)
+    return HttpResponse('// app.v9.js not found', content_type='application/javascript', status=404)
 
 
 # Backward compat: serve old app.js and app.jsx requests
 def serve_app_js(request):
-    return serve_app_v7(request)
+    return serve_app_v9(request)
 
 
 def serve_app_jsx(request):
-    return serve_app_v7(request)
+    return serve_app_v9(request)
+
+
+def serve_app_v7(request):
+    """Backward compat for old v7 references."""
+    return serve_app_v9(request)
 
 
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/', include('core.urls')),
     path('api/', include('network.urls')),
+    path('api/', include('tickets.urls')),
+    path('static/frontend/app.v9.js', serve_app_v9),
     path('static/frontend/app.v7.js', serve_app_v7),
     path('static/frontend/app.js', serve_app_js),
     path('static/frontend/app.jsx', serve_app_jsx),
