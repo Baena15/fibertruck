@@ -1,0 +1,26 @@
+{
+  "name": "FiberTrack - Gestion de incidencias FTTH",
+  "short_name": "FiberTrack",
+  "description": "Diagnostico FTTH y gestion operativa de incidencias para Cieza, Murcia",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#1e40af",
+  "orientation": "portrait-primary",
+  "scope": "/",
+  "lang": "es",
+  "icons": [
+    {
+      "src": "/static/frontend/icons/icon-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/static/frontend/icons/icon-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

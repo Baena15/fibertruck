@@ -63,11 +63,59 @@ def serve_app_v7(request):
     return serve_app_v9(request)
 
 
+def serve_sw_js(request):
+    """Serve service worker from root scope."""
+    possible_paths = [
+        os.path.join(settings.BASE_DIR, 'static', 'frontend', 'sw.js'),
+        os.path.join(settings.BASE_DIR, 'staticfiles', 'frontend', 'sw.js'),
+        os.path.join('/app', 'static', 'frontend', 'sw.js'),
+        os.path.join('/app', 'staticfiles', 'frontend', 'sw.js'),
+    ]
+    for file_path in possible_paths:
+        if os.path.exists(file_path):
+            with open(file_path, 'r', encoding='utf-8') as f:
+                return HttpResponse(f.read(), content_type='application/javascript')
+    return HttpResponse('// sw.js not found', content_type='application/javascript', status=404)
+
+
+def serve_manifest(request):
+    """Serve PWA manifest."""
+    possible_paths = [
+        os.path.join(settings.BASE_DIR, 'static', 'frontend', 'manifest.json'),
+        os.path.join(settings.BASE_DIR, 'staticfiles', 'frontend', 'manifest.json'),
+        os.path.join('/app', 'static', 'frontend', 'manifest.json'),
+        os.path.join('/app', 'staticfiles', 'frontend', 'manifest.json'),
+    ]
+    for file_path in possible_paths:
+        if os.path.exists(file_path):
+            with open(file_path, 'r', encoding='utf-8') as f:
+                return HttpResponse(f.read(), content_type='application/json')
+    return HttpResponse('{}', content_type='application/json', status=404)
+
+
+def serve_icon(request, path):
+    """Serve PWA icons from static/frontend/icons/."""
+    possible_paths = [
+        os.path.join(settings.BASE_DIR, 'static', 'frontend', 'icons', path),
+        os.path.join(settings.BASE_DIR, 'staticfiles', 'frontend', 'icons', path),
+        os.path.join('/app', 'static', 'frontend', 'icons', path),
+        os.path.join('/app', 'staticfiles', 'frontend', 'icons', path),
+    ]
+    for file_path in possible_paths:
+        if os.path.exists(file_path):
+            with open(file_path, 'rb') as f:
+                return HttpResponse(f.read(), content_type='image/png')
+    return HttpResponse('', status=404)
+
+
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/', include('core.urls')),
     path('api/', include('network.urls')),
     path('api/', include('tickets.urls')),
+    path('sw.js', serve_sw_js),
+    path('manifest.json', serve_manifest),
+    path('static/frontend/icons/<path:path>', serve_icon),
     path('static/frontend/app.v9.js', serve_app_v9),
     path('static/frontend/app.v7.js', serve_app_v7),
     path('static/frontend/app.js', serve_app_js),
