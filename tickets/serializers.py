@@ -4,7 +4,7 @@ FiberTrack Tickets - Serializers DRF.
 from django.utils import timezone
 from rest_framework import serializers
 
-from tickets.models import Ticket, TicketStatusHistory, TicketComment, TechnicianProfile
+from tickets.models import Ticket, TicketStatusHistory, TicketComment, TechnicianProfile, DiagnosisLog
 
 
 class TechnicianProfileSerializer(serializers.ModelSerializer):
@@ -67,6 +67,21 @@ class TicketListSerializer(serializers.ModelSerializer):
         ]
 
 
+class DiagnosisLogSerializer(serializers.ModelSerializer):
+    """Serializer ligero para registros de diagnostico asociados a un ticket."""
+    box_code = serializers.CharField(source='box.code', read_only=True)
+    splitter_code = serializers.CharField(source='splitter.code', read_only=True, default=None)
+
+    class Meta:
+        model = DiagnosisLog
+        fields = [
+            'id', 'box_code', 'splitter_code', 'severity', 'confidence',
+            'power_analysis', 'affected_clients', 'possible_solutions',
+            'recommended_action', 'affected_route', 'solution_applied',
+            'resolved', 'resolved_at', 'created_at'
+        ]
+
+
 class TicketDetailSerializer(serializers.ModelSerializer):
     """Serializer completo para detalle de ticket."""
     status_display = serializers.CharField(source='get_status_display', read_only=True)
@@ -80,6 +95,7 @@ class TicketDetailSerializer(serializers.ModelSerializer):
     splitter_code = serializers.CharField(source='affected_splitter.code', read_only=True, default=None)
     status_history = TicketStatusHistorySerializer(many=True, read_only=True)
     comments = serializers.SerializerMethodField()
+    diagnosis_logs = DiagnosisLogSerializer(many=True, read_only=True)
     is_overdue = serializers.BooleanField(read_only=True)
     duration_hours = serializers.FloatField(read_only=True)
 
@@ -102,7 +118,7 @@ class TicketDetailSerializer(serializers.ModelSerializer):
             'created_by', 'created_at', 'updated_at',
             'assigned_at', 'started_at', 'resolved_at', 'closed_at',
             'is_overdue', 'duration_hours',
-            'status_history', 'comments'
+            'status_history', 'comments', 'diagnosis_logs'
         ]
         read_only_fields = ['code', 'tracking_token', 'created_at', 'updated_at']
 

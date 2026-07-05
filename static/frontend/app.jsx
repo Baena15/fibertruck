@@ -292,6 +292,8 @@ function NetworkMap() {
   var s9 = React.useState({feeder: true, distribution: true, drop: true, boxes: true, splices: true, splitters: true, olt: true, clients: true, labels: true});
   var ly = s9[0], setLy = s9[1];
   var s10 = React.useState(15); var zoom = s10[0], setZoom = s10[1];
+  var s11 = React.useState(false); var onlyFaults = s11[0], setOnlyFaults = s11[1];
+  var s12 = React.useState(null); var highlightRoute = s12[0], setHighlightRoute = s12[1];
   var mapR = React.useRef(null); var lm = React.useRef(null); var lr = React.useRef({});
 
   React.useEffect(function() {
@@ -314,6 +316,13 @@ function NetworkMap() {
       lm.current.on('zoomend', function() { setZoom(lm.current.getZoom()); });
     }
     return function() { if (lm.current) { lm.current.remove(); lm.current = null; } };
+  }, []);
+
+  React.useEffect(function() {
+    try {
+      var raw = localStorage.getItem('ft_highlight_route');
+      if (raw) setHighlightRoute(JSON.parse(raw));
+    } catch (e) {}
   }, []);
 
   React.useEffect(function() {
@@ -362,7 +371,8 @@ function NetworkMap() {
     var gr = {
       feeder: L.layerGroup(), distribution: L.layerGroup(), drop: L.layerGroup(),
       boxes: L.layerGroup(), splices: L.layerGroup(), splitters: L.layerGroup(),
-      olt: L.layerGroup(), clients: L.layerGroup(), labels: L.layerGroup()
+      olt: L.layerGroup(), clients: L.layerGroup(), labels: L.layerGroup(),
+      highlight: L.layerGroup()
     };
 
     if (ly.olt && olts[0]) {
@@ -420,6 +430,8 @@ function NetworkMap() {
       (boxes || []).forEach(function(b) {
         if (!b.latitude || !b.longitude) return;
         if (!inZone(b)) return;
+        var aff = (b.affected_count || 0) > 0;
+        if (onlyFaults && !aff) return;
         var col = ZC[b.zone_code] || '#0ea5e9';
         var aff = (b.affected_count || 0) > 0;
         var marker = L.circleMarker([b.latitude, b.longitude], {
@@ -444,13 +456,19 @@ function NetworkMap() {
         if (!c.latitude || !c.longitude) return;
         if (!clientInZone(c)) return;
         var aff = c.status === 'affected';
+        if (onlyFaults && !aff) return;
         var col = aff ? '#dc2626' : '#10b981';
         L.circleMarker([c.latitude, c.longitude], {radius: aff ? 5 : 3, fillColor: col, color: '#fff', weight: aff ? 2 : 1, fillOpacity: 0.9}).addTo(gr.clients).bindPopup('<b>' + c.client_code + '</b><br/>' + c.full_name + '<br/>' + (c.address || ''));
       });
     }
 
-    Object.keys(gr).forEach(function(k) { if (effectiveVisible(k)) { gr[k].addTo(lm.current); lr.current[k] = gr[k]; } });
-  }, [segs, boxes, splices, splitters, olts, zones, clients, ly, selectedZone, zoom]);
+    if (highlightRoute && highlightRoute.route && highlightRoute.route.length >= 2) {
+      L.polyline(highlightRoute.route, {color: highlightRoute.color || '#dc2626', weight: 6, opacity: 0.9, dashArray: '8,6'}).addTo(gr.highlight)
+        .bindPopup('<b>Ruta afectada: ' + (highlightRoute.box_code || '') + '</b>');
+    }
+
+    Object.keys(gr).forEach(function(k) { if (effectiveVisible(k) || k === 'highlight') { gr[k].addTo(lm.current); lr.current[k] = gr[k]; } });
+  }, [segs, boxes, splices, splitters, olts, zones, clients, ly, selectedZone, zoom, onlyFaults, highlightRoute]);
 
   function toggleLayer(k) { setLy(function(p) { var n = {}; Object.keys(p).forEach(function(key) { n[key] = p[key]; }); n[k] = !p[k]; return n; }); }
   var layerBtns = [
@@ -494,7 +512,18 @@ function NetworkMap() {
         title: dimmed ? 'Aumenta el zoom para ver esta capa' : '',
         className: 'px-3 py-1 rounded-lg text-xs font-medium border ' + (active ? (dimmed ? c + ' opacity-60' : c) : 'bg-gray-50 text-gray-400')
       }, [(active ? '✓ ' : '✗ ') + l + (dimmed ? ' (zoom)' : '')]);
-    }))),
+    })).concat([
+      ce('button', {
+        key: 'only-faults',
+        onClick: function() { setOnlyFaults(function(v) { return !v; }); },
+        className: 'px-3 py-1 rounded-lg text-xs font-medium border ' + (onlyFaults ? 'bg-red-100 text-red-700 border-red-300' : 'bg-gray-50 text-gray-400')
+      }, [onlyFaults ? '✓ Solo averías' : '✗ Solo averías']),
+      ce('button', {
+        key: 'clear-route',
+        onClick: function() { setHighlightRoute(null); try { localStorage.removeItem('ft_highlight_route'); } catch (e) {} },
+        className: 'px-3 py-1 rounded-lg text-xs font-medium border ' + (highlightRoute ? 'bg-purple-100 text-purple-700 border-purple-300' : 'bg-gray-50 text-gray-400')
+      }, [highlightRoute ? '✓ Limpiar ruta' : '— Sin ruta'])
+    ])),
     ce('div', {className: 'relative'}, [
       ce('div', {ref: mapR, style: {height: '75vh'}, className: 'bg-white rounded-xl shadow-sm border'}),
       ce('div', {className: 'absolute top-2 right-2 bg-white/90 backdrop-blur rounded-lg shadow border text-xs px-3 py-2 space-y-1 pointer-events-none'}, [
@@ -503,6 +532,13 @@ function NetworkMap() {
         ce('div', {className: 'text-blue-600'}, ['Distribution: ' + stats.distribution]),
         ce('div', {className: 'text-green-600'}, ['Drop: ' + stats.drop]),
         ce('div', {className: 'text-gray-600'}, ['Cajas: ' + stats.boxes + (stats.affected ? ' ⚠' + stats.affected : '')])
+      ]),
+      ce('div', {className: 'absolute bottom-2 left-2 bg-white/90 backdrop-blur rounded-lg shadow border text-xs px-3 py-2 pointer-events-none'}, [
+        ce('div', {className: 'font-semibold text-gray-700 mb-1'}, ['Leyenda']),
+        ce('div', {className: 'flex items-center gap-2'}, [ce('span', {className: 'w-4 h-1 bg-red-600 rounded'}), ce('span', null, ['Feeder'])]),
+        ce('div', {className: 'flex items-center gap-2'}, [ce('span', {className: 'w-4 h-1 bg-blue-600 rounded'}), ce('span', null, ['Distribution'])]),
+        ce('div', {className: 'flex items-center gap-2'}, [ce('span', {className: 'w-4 h-1 bg-green-600 rounded'}), ce('span', null, ['Drop'])]),
+        ce('div', {className: 'flex items-center gap-2'}, [ce('span', {className: 'w-3 h-3 rounded-full border-2 border-red-600'}), ce('span', null, ['Caja con fallo'])])
       ])
     ])
   ]);
@@ -585,8 +621,31 @@ function DiagnoseV2() {
     });
   }
 
+  var s10 = React.useState(null); var ticketInfo = s10[0], setTicketInfo = s10[1];
+
+  function createTicket(autoAssign) {
+    setLd(true); setEr('');
+    pa('/api/diagnose/v2/create_ticket/', {box_code: bc.toUpperCase(), affected_client_ids: sc, auto_assign: !!autoAssign}).then(function(d) {
+      if (d && d.success) {
+        setTicketInfo(d);
+        if (d.diagnosis && d.diagnosis.affected_route) {
+          localStorage.setItem('ft_highlight_route', JSON.stringify({route: d.diagnosis.affected_route, box_code: bc.toUpperCase(), color: '#dc2626'}));
+        }
+        setTimeout(function() { window.dispatchEvent(new CustomEvent('ft_navigate', {detail: 'tickets'})); }, 1200);
+      } else { setEr('Error al crear ticket'); }
+      setLd(false);
+    }).catch(function() { setEr('Error al crear ticket'); setLd(false); });
+  }
+
+  function viewRouteOnMap() {
+    if (res && res.affected_route) {
+      localStorage.setItem('ft_highlight_route', JSON.stringify({route: res.affected_route, box_code: bc.toUpperCase(), color: '#dc2626'}));
+    }
+    window.dispatchEvent(new CustomEvent('ft_navigate', {detail: 'map'}));
+  }
+
   function toggleClient(id) { setSc(function(p) { return p.includes(id) ? p.filter(function(x) { return x !== id; }) : p.concat([id]); }); }
-  function reset() { setStep(1); setBc(''); setBox(null); setCl([]); setSc([]); setRes(null); setEr(''); }
+  function reset() { setStep(1); setBc(''); setBox(null); setCl([]); setSc([]); setRes(null); setEr(''); setTicketInfo(null); }
 
   var scn = '';
   if (res) scn = res.severity === 'critical' ? 'CRITICO' : res.severity === 'high' ? 'ALTO' : res.severity === 'medium' ? 'MEDIO' : 'BAJO';
@@ -672,7 +731,16 @@ function DiagnoseV2() {
           ]);
         }))
       ]) : null,
-      ce('button', {onClick: reset, className: 'w-full py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700'}, ['Nuevo diagnostico'])
+      ticketInfo ? ce('div', {className: 'bg-green-50 border border-green-200 rounded-xl p-4'}, [
+        ce('h3', {className: 'font-bold text-green-800 mb-1'}, ['TICKET CREADO']),
+        ce('p', {className: 'text-sm text-green-700'}, [ticketInfo.ticket_code + (ticketInfo.assigned_to ? ' asignado a ' + ticketInfo.assigned_to : ' sin asignar')]),
+        ce('button', {onClick: function() { window.dispatchEvent(new CustomEvent('ft_navigate', {detail: 'tickets'})); }, className: 'mt-2 text-sm text-green-800 underline'}, ['Ver tickets'])
+      ]) : ce('div', {className: 'grid grid-cols-2 gap-3'}, [
+        ce('button', {onClick: function() { createTicket(false); }, disabled: ld, className: 'px-4 py-2 bg-white border border-blue-300 text-blue-700 rounded-lg font-semibold hover:bg-blue-50 disabled:opacity-50'}, [ld ? '...' : 'Crear ticket']),
+        ce('button', {onClick: function() { createTicket(true); }, disabled: ld, className: 'px-4 py-2 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 disabled:opacity-50'}, [ld ? '...' : 'Crear y asignar'])
+      ]),
+      ce('button', {onClick: viewRouteOnMap, className: 'w-full py-2 text-blue-600 border border-blue-200 rounded-lg hover:bg-blue-50 text-sm font-medium'}, ['Ver ruta afectada en el mapa']),
+      ce('button', {onClick: reset, className: 'w-full py-3 bg-gray-600 text-white rounded-lg font-semibold hover:bg-gray-700'}, ['Nuevo diagnostico'])
     ]);
   }
 
@@ -825,6 +893,9 @@ function TicketDetail(props) {
   var s3 = React.useState(''); var error = s3[0], setError = s3[1];
   var s4 = React.useState(false); var loading = s4[0], setLoading = s4[1];
   var s5 = React.useState(null); var suggestions = s5[0], setSuggestions = s5[1];
+  var s6 = React.useState(''); var solutionText = s6[0], setSolutionText = s6[1];
+  var s7 = React.useState(true); var restoreClients = s7[0], setRestoreClients = s7[1];
+  var s8 = React.useState(false); var applying = s8[0], setApplying = s8[1];
 
   React.useEffect(function() {
     setLoading(true);
@@ -854,6 +925,17 @@ function TicketDetail(props) {
     fa('/api/tickets/' + ticket.id + '/suggest/').then(function(d) {
       setSuggestions((d && d.suggestions) || []); setLoading(false);
     });
+  }
+
+  function applySolution(logId) {
+    if (!solutionText.trim()) return;
+    setApplying(true); setError('');
+    pa('/api/diagnose/v2/apply_solution/' + logId + '/', {
+      solution_applied: solutionText.trim(),
+      restore_clients: restoreClients
+    }).then(function() {
+      setApplying(false); setSolutionText(''); refresh();
+    }).catch(function(e) { setError((e && e.error) || 'Error al aplicar solución'); setApplying(false); });
   }
 
   function addComment(e) {
@@ -958,7 +1040,39 @@ function TicketDetail(props) {
             ]);
           })
         ]) : null
-      ]) : null
+      ]) : null,
+      (function() {
+        var openLogs = (t.diagnosis_logs || []).filter(function(l) { return !l.resolved; });
+        if (openLogs.length === 0 || ['closed', 'cancelled', 'resolved'].indexOf(t.status) >= 0) return null;
+        var log = openLogs[0];
+        var sols = log.possible_solutions || [];
+        return ce('div', {className: 'border-t pt-3 mt-3'}, [
+          ce('h4', {className: 'font-bold text-sm mb-2'}, ['Cierre con diagnóstico (' + log.box_code + ')']),
+          sols.length > 0 ? ce('select', {
+            value: '',
+            onChange: function(e) { if (e.target.value) setSolutionText(e.target.value); },
+            className: 'w-full px-3 py-2 border rounded-lg text-sm mb-2'
+          }, [
+            ce('option', {value: ''}, ['Selecciona una solución sugerida...'])
+          ].concat(sols.map(function(s, i) { return ce('option', {key: i, value: s}, [s]); }))) : null,
+          ce('textarea', {
+            value: solutionText,
+            onChange: function(e) { setSolutionText(e.target.value); },
+            placeholder: 'Describe la solución aplicada...',
+            rows: 2,
+            className: 'w-full px-3 py-2 border rounded-lg text-sm mb-2'
+          }),
+          ce('label', {className: 'flex items-center gap-2 text-sm mb-2'}, [
+            ce('input', {type: 'checkbox', checked: restoreClients, onChange: function(e) { setRestoreClients(e.target.checked); }}),
+            'Restaurar clientes afectados a activos'
+          ]),
+          ce('button', {
+            onClick: function() { applySolution(log.id); },
+            disabled: applying || !solutionText.trim(),
+            className: 'px-4 py-2 bg-green-600 text-white rounded-lg text-sm disabled:opacity-50'
+          }, [applying ? 'Aplicando...' : 'Aplicar solución y resolver'])
+        ]);
+      })()
     ]) : null,
 
     ce('div', {className: 'grid grid-cols-1 md:grid-cols-2 gap-4'}, [
@@ -1239,6 +1353,12 @@ function App() {
       fa('/api/auth/me/').then(function(u) { if (u) setUser(u); });
     }
   }, [li]);
+
+  React.useEffect(function() {
+    function onNav(e) { if (e.detail) setAt(e.detail); }
+    window.addEventListener('ft_navigate', onNav);
+    return function() { window.removeEventListener('ft_navigate', onNav); };
+  }, []);
 
   if (!li) {
     if (trackingMode) {

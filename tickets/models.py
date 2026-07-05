@@ -474,3 +474,56 @@ class TicketAttachment(models.Model):
 
     def __str__(self):
         return f"{self.attachment_type} - {self.ticket.code}"
+
+
+class DiagnosisLog(models.Model):
+    """
+    Registro histórico de diagnósticos automáticos FTTH.
+    Permite trazabilidad de averías, soluciones aplicadas y restauración de clientes.
+    """
+    box = models.ForeignKey(
+        'network.FiberBox',
+        on_delete=models.CASCADE,
+        related_name='diagnosis_logs',
+        verbose_name=_('Caja afectada')
+    )
+    splitter = models.ForeignKey(
+        'network.Splitter',
+        on_delete=models.CASCADE,
+        related_name='diagnosis_logs',
+        null=True, blank=True,
+        verbose_name=_('Splitter afectado')
+    )
+    ticket = models.ForeignKey(
+        Ticket,
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='diagnosis_logs',
+        verbose_name=_('Ticket operativo')
+    )
+    severity = models.CharField(max_length=20, verbose_name=_('Severidad'))
+    confidence = models.PositiveSmallIntegerField(default=0, verbose_name=_('Confianza %'))
+    power_analysis = models.JSONField(default=dict, verbose_name=_('Análisis de potencia'))
+    affected_clients = models.JSONField(default=list, verbose_name=_('Clientes afectados'))
+    possible_solutions = models.JSONField(default=list, verbose_name=_('Posibles soluciones'))
+    recommended_action = models.TextField(blank=True, verbose_name=_('Acción recomendada'))
+    affected_route = models.JSONField(default=list, verbose_name=_('Ruta afectada'))
+    solution_applied = models.TextField(blank=True, verbose_name=_('Solución aplicada'))
+    resolved = models.BooleanField(default=False, verbose_name=_('Resuelto'))
+    resolved_at = models.DateTimeField(null=True, blank=True, verbose_name=_('Fecha de resolución'))
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='diagnosis_logs',
+        verbose_name=_('Creado por')
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = _('Registro de diagnóstico')
+        verbose_name_plural = _('Registros de diagnóstico')
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"Diagnóstico {self.box.code} - {self.severity} - {self.created_at.strftime('%Y-%m-%d %H:%M')}"

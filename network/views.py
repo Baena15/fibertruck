@@ -8,8 +8,10 @@ from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.response import Response
 from django.contrib.auth import get_user_model
 from django.db.models import Count, Q
+from django.utils import timezone
 from core.views import IsAdmin, IsSupervisor, IsTechnician
-from tickets.models import Ticket, TechnicianProfile
+from tickets.models import Ticket, TechnicianProfile, DiagnosisLog
+from tickets.services.assignment import suggest_technicians
 from .models import (
     OLT, Zone, Splitter, FiberBox, Client, FiberIncident,
     FiberCable, SpliceClosure, CableSegment, FiberAssignment,
@@ -255,6 +257,25 @@ class ClientViewSet(viewsets.ModelViewSet):
         diagnosis = self._run_diagnosis(client)
         return Response({'client': ClientSerializer(client).data, 'diagnosis': diagnosis})
 
+    @action(detail=True, methods=['post'], url_path='restore')
+    def restore(self, request, pk=None):
+        """Restaura un cliente a estado activo tras reparar su avería."""
+        client = self.get_object()
+        optical_power = request.data.get('optical_power_rx')
+        client.status = 'active'
+        if optical_power is not None:
+            try:
+                client.optical_power_rx = float(optical_power)
+            except (ValueError, TypeError):
+                pass
+        client.save()
+        # Actualizar logs de diagnóstico abiertos para este cliente
+        DiagnosisLog.objects.filter(
+            affected_clients__contains=[{'id': client.id}],
+            resolved=False
+        ).update(resolved=True, resolved_at=timezone.now())
+        return Response({'success': True, 'client': ClientSerializer(client).data})
+
     def _run_diagnosis(self, initial_client):
         """Algoritmo FTFL: Fault Locator con puntos de divergencia"""
         from collections import Counter
@@ -471,37 +492,18 @@ class FiberAssignmentViewSet(viewsets.ReadOnlyModelViewSet):
 # ENDPOINTS FTTH AVANZADOS - Diagnostico, Topologia y Trace
 # ============================================================
 
-@api_view(['POST'])
-@permission_classes([permissions.IsAuthenticated])
-def diagnose_v2(request):
+def _run_diagnosis(box_code, affected_client_ids):
     """
-    Diagnostico avanzado FTTH v2 con analisis de tramos y potencia.
-
-    POST /api/diagnose/v2/
-    Body: {"box_code": "CTO-023", "affected_client_ids": [45,46,47]}
-
-    Devuelve:
-    {
-        "severity": "critical|high|medium|low",
-        "confidence": 95,
-        "affected_segment": {...},
-        "power_analysis": {"expected_dbm": -17.5, "measured_dbm": -45.0, "loss_db": 27.5, "status": "CORTE TOTAL"},
-        "fault_location": {"description": "...", "coordinates": [lat,lng], "address": "..."},
-        "recommended_action": "paso a paso...",
-        "affected_clients": [...],
-        "affected_route": [[lat,lng], ...]
-    }
+    Ejecuta el algoritmo de diagnostico FTTH v2 y devuelve un dict con los resultados.
+    Si hay error devuelve {'error': '...', 'status': codigo_http}.
     """
-    box_code = request.data.get('box_code', '')
-    affected_client_ids = request.data.get('affected_client_ids', [])
-
     if not box_code:
-        return Response({'error': 'box_code es requerido'}, status=status.HTTP_400_BAD_REQUEST)
+        return {'error': 'box_code es requerido', 'status': status.HTTP_400_BAD_REQUEST}
 
     try:
         box = FiberBox.objects.select_related('splitter', 'splitter__olt', 'zone').get(code__iexact=box_code, is_active=True)
     except FiberBox.DoesNotExist:
-        return Response({'error': f'Caja {box_code} no encontrada'}, status=status.HTTP_404_NOT_FOUND)
+        return {'error': f'Caja {box_code} no encontrada', 'status': status.HTTP_404_NOT_FOUND}
 
     # 1. Obtener clientes afectados por IDs o por status
     if affected_client_ids:
@@ -616,7 +618,7 @@ def diagnose_v2(request):
     # 10. Clientes afectados serializados
     clients_data = ClientListSerializer(affected_clients, many=True).data
 
-    return Response({
+    result = {
         'severity': severity,
         'confidence': confidence,
         'affected_segment': segment_json,
@@ -638,6 +640,214 @@ def diagnose_v2(request):
         'affected_count': affected_count,
         'total_affected_in_splitter': total_affected_in_splitter,
         'boxes_affected_in_splitter': len(boxes_with_issues),
+    }
+    result["box"] = box
+    result["affected_clients_qs"] = affected_clients
+    return result
+
+@api_view(['POST'])
+@permission_classes([permissions.IsAuthenticated])
+def diagnose_v2(request):
+    """
+    Diagnostico avanzado FTTH v2 con analisis de tramos y potencia.
+    """
+    box_code = request.data.get('box_code', '')
+    affected_client_ids = request.data.get('affected_client_ids', [])
+    result = _run_diagnosis(box_code, affected_client_ids)
+    if 'error' in result:
+        status_code = result.pop('status', status.HTTP_400_BAD_REQUEST)
+        return Response(result, status=status_code)
+    result.pop('box', None)
+    result.pop('affected_clients_qs', None)
+    return Response(result)
+
+
+@api_view(['POST'])
+@permission_classes([permissions.IsAuthenticated])
+def diagnose_create_ticket(request):
+    """
+    Ejecuta el diagnostico y crea un ticket operativo a partir del resultado.
+    Opcionalmente asigna el tecnico mas cercano disponible.
+    POST /api/diagnose/v2/create_ticket/
+    Body: {"box_code": "CTO-0023", "affected_client_ids": [143], "auto_assign": true}
+    """
+    box_code = request.data.get('box_code', '')
+    affected_client_ids = request.data.get('affected_client_ids', [])
+    auto_assign = request.data.get('auto_assign', False)
+
+    diag = _run_diagnosis(box_code, affected_client_ids)
+    if 'error' in diag:
+        status_code = diag.pop('status', status.HTTP_400_BAD_REQUEST)
+        return Response(diag, status=status_code)
+
+    box = diag.pop('box')
+    affected_clients_qs = diag.pop('affected_clients_qs')
+    affected_clients = list(affected_clients_qs)
+
+    severity = diag['severity']
+    priority_map = {'critical': 'critical', 'high': 'high', 'medium': 'medium', 'low': 'low'}
+    ticket_type = 'network_fault' if diag.get('affected_count', 0) > 1 or diag.get('total_affected_in_splitter', 0) > 1 else 'home_fault'
+
+    first_client = affected_clients[0] if affected_clients else None
+
+    title = f"Avería {box.code} - {diag.get('affected_count', 0)} cliente(s) afectado(s)"
+    description_lines = [
+        f"Diagnóstico automático: {diag.get('confidence', 0)}% de confianza.",
+        f"Fallo detectado: {diag.get('fault_location', {}).get('description', 'N/A')}",
+        f"Potencia esperada: {diag.get('power_analysis', {}).get('expected_dbm')} dBm | "
+        f"Medida: {diag.get('power_analysis', {}).get('measured_dbm')} dBm | "
+        f"Pérdida: {diag.get('power_analysis', {}).get('loss_db')} dB",
+        "",
+        "Acción recomendada:",
+        diag.get('recommended_action', ''),
+        "",
+        "Posibles soluciones:",
+    ]
+    description_lines.extend([f"- {s}" for s in diag.get('possible_solutions', [])])
+    description = "\\n".join(description_lines)
+
+    ticket = Ticket.objects.create(
+        title=title,
+        description=description,
+        ticket_type=ticket_type,
+        priority=priority_map.get(severity, 'medium'),
+        client=first_client,
+        affected_box=box,
+        affected_splitter=box.splitter,
+        address=box.address or '',
+        latitude=box.latitude,
+        longitude=box.longitude,
+        sla_hours=4 if severity == 'critical' else 8 if severity == 'high' else 24,
+        created_by=request.user,
+    )
+
+    suggestions = []
+    if ticket.latitude is not None and ticket.longitude is not None:
+        suggestions = suggest_technicians(ticket, limit=3)
+
+    assigned = None
+    if auto_assign and suggestions:
+        best = suggestions[0]
+        tech_id = best.get('user_id') or best.get('technician_id')
+        if tech_id:
+            try:
+                technician = User.objects.get(pk=tech_id, role='technician')
+                ticket.assigned_to = technician
+                ticket.coordinator = request.user
+                ticket.status = 'assigned'
+                ticket.assigned_at = timezone.now()
+                ticket.save()
+                assigned = technician.get_full_name() or technician.username
+            except User.DoesNotExist:
+                pass
+
+    DiagnosisLog.objects.create(
+        box=box,
+        splitter=box.splitter,
+        ticket=ticket,
+        severity=diag['severity'],
+        confidence=diag['confidence'],
+        power_analysis=diag.get('power_analysis', {}),
+        affected_clients=diag.get('affected_clients', []),
+        possible_solutions=diag.get('possible_solutions', []),
+        recommended_action=diag.get('recommended_action', ''),
+        affected_route=diag.get('affected_route', []),
+        created_by=request.user,
+    )
+
+    return Response({
+        'success': True,
+        'ticket_id': ticket.id,
+        'ticket_code': ticket.code,
+        'diagnosis': diag,
+        'suggestions': suggestions,
+        'assigned_to': assigned,
+    }, status=status.HTTP_201_CREATED)
+
+
+@api_view(['GET'])
+@permission_classes([permissions.IsAuthenticated])
+def diagnosis_history(request):
+    """Devuelve el historial de diagnósticos automáticos."""
+    limit = int(request.query_params.get('limit', 50))
+    qs = DiagnosisLog.objects.select_related('box', 'splitter', 'ticket').order_by('-created_at')[:limit]
+    data = []
+    for log in qs:
+        data.append({
+            'id': log.id,
+            'box_code': log.box.code,
+            'box_name': log.box.name,
+            'splitter_code': log.splitter.code if log.splitter else None,
+            'severity': log.severity,
+            'confidence': log.confidence,
+            'power_analysis': log.power_analysis,
+            'affected_clients': log.affected_clients,
+            'possible_solutions': log.possible_solutions,
+            'recommended_action': log.recommended_action,
+            'affected_route': log.affected_route,
+            'solution_applied': log.solution_applied,
+            'resolved': log.resolved,
+            'resolved_at': log.resolved_at,
+            'ticket_code': log.ticket.code if log.ticket else None,
+            'ticket_status': log.ticket.status if log.ticket else None,
+            'created_at': log.created_at,
+        })
+    return Response(data)
+
+
+@api_view(['POST'])
+@permission_classes([permissions.IsAuthenticated])
+def apply_solution(request, log_id):
+    """
+    Aplica una solucion a un diagnostico guardado, resuelve el ticket asociado
+    y opcionalmente restaura los clientes afectados.
+    POST /api/diagnose/v2/apply_solution/<log_id>/
+    Body: {"solution_applied": "Reparado empalme...", "restore_clients": true}
+    """
+    try:
+        log = DiagnosisLog.objects.select_related('ticket', 'box').get(pk=log_id)
+    except DiagnosisLog.DoesNotExist:
+        return Response({'error': 'Diagnostico no encontrado'}, status=status.HTTP_404_NOT_FOUND)
+
+    solution_applied = request.data.get('solution_applied', '').strip()
+    restore_clients = request.data.get('restore_clients', True)
+
+    if not solution_applied:
+        return Response({'error': 'solution_applied es requerido'}, status=status.HTTP_400_BAD_REQUEST)
+
+    log.solution_applied = solution_applied
+    log.resolved = True
+    log.resolved_at = timezone.now()
+    log.save()
+
+    # Resolver ticket asociado si existe y esta abierto
+    ticket = log.ticket
+    if ticket and ticket.status not in ['closed', 'cancelled', 'resolved']:
+        ticket.solution_applied = solution_applied
+        ticket.status = 'resolved'
+        ticket.resolved_at = timezone.now()
+        ticket.save()
+
+    # Restaurar clientes afectados
+    restored = 0
+    if restore_clients and log.affected_clients:
+        client_ids = []
+        for item in log.affected_clients:
+            cid = item.get('id') if isinstance(item, dict) else None
+            if cid:
+                client_ids.append(cid)
+        if client_ids:
+            restored = Client.objects.filter(id__in=client_ids, status='affected').update(
+                status='active', updated_at=timezone.now()
+            )
+
+    return Response({
+        'success': True,
+        'log_id': log.id,
+        'ticket_code': ticket.code if ticket else None,
+        'solution_applied': solution_applied,
+        'resolved': log.resolved,
+        'restored_clients': restored,
     })
 
 
