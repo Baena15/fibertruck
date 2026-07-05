@@ -4,12 +4,20 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" type="image/png" href="/static/frontend/icons/icon-192x192.png">
   <title>FiberTruck - Diagnostico FTTH Cieza</title>
   <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
-  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script>
+    // Forzar actualizacion del service worker en cada nuevo despliegue importante
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.getRegistrations().then(function(regs) {
+        regs.forEach(function(r) { r.update(); });
+      });
+    }
+  </script>
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
     tailwind.config = {
@@ -30,10 +38,27 @@
     .severity-critical { border-left: 4px solid #dc2626; background: #fee2e2; }
     .severity-high { border-left: 4px solid #f59e0b; background: #fef3c7; }
     .severity-medium { border-left: 4px solid #3b82f6; background: #dbeafe; }
+    .cable-label span {
+      display: inline-block;
+      padding: 1px 5px;
+      border-radius: 4px;
+      font-size: 10px;
+      font-weight: 700;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      white-space: nowrap;
+      text-shadow: 0 0 2px #fff;
+      box-shadow: 0 1px 2px rgba(0,0,0,0.15);
+    }
+    .olt-marker { display: flex; align-items: center; gap: 4px; }
+    .olt-dot { width: 14px; height: 14px; background: #dc2626; border: 2px solid white; border-radius: 50%; box-shadow: 0 0 0 2px #dc2626; }
+    .olt-label { font-size: 10px; font-weight: 800; color: #dc2626; background: white; padding: 1px 4px; border-radius: 4px; border: 1px solid #dc2626; }
+    .box-pulse { animation: boxPulse 1.5s infinite; }
+    @keyframes boxPulse { 0% { stroke-width: 4; stroke-opacity: 1; } 50% { stroke-width: 8; stroke-opacity: 0.5; } 100% { stroke-width: 4; stroke-opacity: 1; } }
+    .box-fault-icon { font-size: 16px; line-height: 1; text-align: center; color: #dc2626; text-shadow: 0 0 2px #fff; pointer-events: none; }
   </style>
 </head>
 <body class="bg-gray-100">
   <div id="root"></div>
-  <script type="text/babel" src="{% static 'frontend/app.jsx' %}"></script>
+  <script type="text/javascript" src="{% static 'frontend/app.v9.js' %}?v=4"></script>
 </body>
 </html>

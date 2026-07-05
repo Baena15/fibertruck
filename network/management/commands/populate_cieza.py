@@ -15,7 +15,11 @@ Calculos opticos basados en:
 """
 import json
 import math
+import os
 import random
+import time
+
+import requests
 from django.core.management.base import BaseCommand
 from network.models import (
     OLT, Zone, FiberCable, SpliceClosure, Splitter, FiberBox,
@@ -190,14 +194,115 @@ def route_length_m(coords):
     return total
 
 
-def generate_route(start_lat, start_lng, end_lat, end_lng, num_points=None, urban_factor=0.15):
+# ============================================================
+# ROUTING POR CALLES REALES (OSRM + cache local)
+# ============================================================
+ROUTE_CACHE_FILE = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)),
+    'cieza_routes_cache.json'
+)
+
+
+def _load_route_cache():
+    """Carga cache de rutas OSRM desde disco."""
+    if os.path.exists(ROUTE_CACHE_FILE):
+        try:
+            with open(ROUTE_CACHE_FILE, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except (json.JSONDecodeError, IOError):
+            return {}
+    return {}
+
+
+def _save_route_cache(cache):
+    """Guarda cache de rutas OSRM en disco."""
+    try:
+        with open(ROUTE_CACHE_FILE, 'w', encoding='utf-8') as f:
+            json.dump(cache, f, ensure_ascii=False)
+    except IOError:
+        pass
+
+
+def _route_cache_key(start_lat, start_lng, end_lat, end_lng):
+    """Clave de cache redondeada a 5 decimales (~1m de precision)."""
+    return (
+        f"{round(start_lat, 5)},{round(start_lng, 5)};"
+        f"{round(end_lat, 5)},{round(end_lng, 5)}"
+    )
+
+
+def get_osrm_route(start_lat, start_lng, end_lat, end_lng, cache=None, delay_ms=100):
+    """
+    Obtiene una ruta por calles reales usando OSRM.
+    Usa cache local para evitar peticiones repetidas y rate limits.
+    Si falla, retorna None para que el caller use el generador procedural.
+    """
+    if cache is None:
+        cache = _load_route_cache()
+
+    key = _route_cache_key(start_lat, start_lng, end_lat, end_lng)
+    if key in cache:
+        return cache[key]
+
+    # OSRM public API (driving profile es suficiente para calles urbanas)
+    url = (
+        f"https://router.project-osrm.org/route/v1/driving/"
+        f"{start_lng},{start_lat};{end_lng},{end_lat}"
+        f"?overview=full&geometries=geojson"
+    )
+
+    try:
+        # Pausa para no saturar la API publica
+        time.sleep(delay_ms / 1000.0)
+        response = requests.get(url, timeout=15)
+        response.raise_for_status()
+        data = response.json()
+
+        if data.get('code') != 'Ok' or not data.get('routes'):
+            return None
+
+        # OSRM devuelve [lng, lat]; convertimos a [lat, lng]
+        coords = [
+            [round(point[1], 6), round(point[0], 6)]
+            for point in data['routes'][0]['geometry']['coordinates']
+        ]
+        if len(coords) < 2:
+            return None
+
+        cache[key] = coords
+        _save_route_cache(cache)
+        return coords
+    except Exception:
+        return None
+
+
+def generate_route(start_lat, start_lng, end_lat, end_lng, num_points=None, urban_factor=0.15, osrm_cache=None):
     """
     Genera coordenadas intermedias realistas entre dos puntos.
+
+    Si se proporciona osrm_cache, intenta obtener una ruta por calles reales
+    usando OSRM. Si OSRM no esta disponible o falla, genera una ruta procedural.
 
     Crea trayectorias con mas vertices para que parezcan cables desplegados
     por calles y aceras. Añade desvios perpendiculares para romper la linea recta.
     urban_factor: maxima desviacion perpendicular como fraccion de la distancia.
     """
+    # Intentar routing por calles reales
+    if osrm_cache is not None:
+        osrm_route = get_osrm_route(
+            start_lat, start_lng, end_lat, end_lng, cache=osrm_cache
+        )
+        if osrm_route:
+            # Añadir ligero ruido para que cables paralelos no se solapen exactamente
+            noisy_route = [osrm_route[0]]
+            for pt in osrm_route[1:-1]:
+                noisy_route.append([
+                    round(pt[0] + random.uniform(-0.00001, 0.00001), 6),
+                    round(pt[1] + random.uniform(-0.00001, 0.00001), 6),
+                ])
+            noisy_route.append(osrm_route[-1])
+            return noisy_route
+
     distance_m = haversine_m(start_lat, start_lng, end_lat, end_lng)
 
     # Un punto cada ~60 m, minimo 3, maximo 16
@@ -400,6 +505,7 @@ class Command(BaseCommand):
         self.box_counter = 0
         self.client_counter = 0
         self.global_splitter_port = 0
+        self.osrm_cache = _load_route_cache()
 
     def handle(self, *args, **options):
         random.seed(42)
@@ -800,7 +906,8 @@ class Command(BaseCommand):
                 route = generate_route(
                     olt.latitude, olt.longitude,
                     splice.latitude, splice.longitude,
-                    num_points=max(5, min(12, int(feeder.length_m / 80)))
+                    num_points=max(5, min(12, int(feeder.length_m / 80))),
+                    osrm_cache=self.osrm_cache,
                 )
                 CableSegment.objects.create(
                     cable=feeder,
@@ -815,6 +922,8 @@ class Command(BaseCommand):
                     notes=f'Feeder: OLT -> {splice.code}',
                 )
                 seg_count += 1
+            self.stdout.write(self.style.HTTP_INFO(
+                f'  {len(feeder_map[zone_code])} feeders creados para {zone_code}'))
 
         # Distribution segments: Empalme -> Splitter
         for splitter in all_splitters:
@@ -823,7 +932,8 @@ class Command(BaseCommand):
             route = generate_route(
                 splice.latitude, splice.longitude,
                 splitter.latitude, splitter.longitude,
-                num_points=random.randint(3, 5)
+                num_points=random.randint(3, 5),
+                osrm_cache=self.osrm_cache,
             )
             CableSegment.objects.create(
                 cable=dist_cable,
@@ -838,6 +948,8 @@ class Command(BaseCommand):
                 notes=f'Distribution: {splice.code} -> {splitter.code}',
             )
             seg_count += 1
+        self.stdout.write(self.style.HTTP_INFO(
+            f'  {len(all_splitters)} distribution segments creados'))
 
         # Drop segments: Splitter -> Caja
         for box in all_boxes:
@@ -846,7 +958,8 @@ class Command(BaseCommand):
             route = generate_route(
                 splitter.latitude, splitter.longitude,
                 box.latitude, box.longitude,
-                num_points=random.randint(2, 5)
+                num_points=random.randint(2, 5),
+                osrm_cache=self.osrm_cache,
             )
             CableSegment.objects.create(
                 cable=drop_cable,
@@ -861,15 +974,19 @@ class Command(BaseCommand):
                 notes=f'Drop: {splitter.code} -> {box.code}',
             )
             seg_count += 1
+        self.stdout.write(self.style.HTTP_INFO(
+            f'  {len(all_boxes)} drop segments splitter->caja creados'))
 
         # Box-to-client segments
         for client in all_clients:
             cli_drop_cable = drop_client_map[client.client_code]
             box = client.box
+            # Los tramos box_to_client son muy cortos; usamos rutas procedurales
+            # para no saturar OSRM con cientos de peticiones.
             route = generate_route(
                 box.latitude, box.longitude,
                 client.latitude, client.longitude,
-                num_points=random.randint(1, 3)
+                num_points=random.randint(1, 3),
             )
             CableSegment.objects.create(
                 cable=cli_drop_cable,

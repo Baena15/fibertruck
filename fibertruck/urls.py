@@ -4,34 +4,26 @@ FiberTruck main URLs
 from django.contrib import admin
 from django.urls import path, include
 from django.conf import settings
-from django.http import HttpResponse
+from django.http import HttpResponse, JsonResponse
+from django.shortcuts import render
+from django.db import connection
 import os
 
 
+def health_check(request):
+    """Public health endpoint for Railway / load balancers."""
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT 1")
+            cursor.fetchone()
+        return JsonResponse({'status': 'ok', 'db': 'connected'})
+    except Exception as e:
+        return JsonResponse({'status': 'error', 'detail': str(e)}, status=503)
+
+
 def serve_index(request):
-    """Serve the static index.html for the React frontend."""
-    possible_paths = [
-        os.path.join(settings.BASE_DIR, 'static', 'frontend', 'index.html'),
-        os.path.join(settings.BASE_DIR, 'staticfiles', 'frontend', 'index.html'),
-        os.path.join('/app', 'static', 'frontend', 'index.html'),
-        os.path.join('/app', 'staticfiles', 'frontend', 'index.html'),
-    ]
-    for file_path in possible_paths:
-        if os.path.exists(file_path):
-            with open(file_path, 'r', encoding='utf-8') as f:
-                return HttpResponse(f.read(), content_type='text/html')
-    # Fallback: return inline HTML with app.v9.js reference
-    return HttpResponse('''<!DOCTYPE html>
-<html lang="es"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>FiberTrack - Diagnostico FTTH + Gestion de incidencias Cieza</title>
-<script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
-<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-<script src="https://cdn.tailwindcss.com"></script>
-</head><body class="bg-gray-100"><div id="root"></div>
-<script type="text/javascript" src="/static/frontend/app.v9.js"></script>
-</body></html>''', content_type='text/html')
+    """Serve the Django template for the React frontend (Babel + app.jsx)."""
+    return render(request, 'frontend/index.html')
 
 
 def serve_app_v9(request):
@@ -109,6 +101,7 @@ def serve_icon(request, path):
 
 
 urlpatterns = [
+    path('health/', health_check, name='health'),
     path('admin/', admin.site.urls),
     path('api/', include('core.urls')),
     path('api/', include('network.urls')),

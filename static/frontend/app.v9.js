@@ -3,8 +3,19 @@
  * Diagnostico FTTH + Gestion operativa de incidencias (tickets).
  */
 var API_URL = '';
-var ZC = {'Z-ERA': '#dc2626', 'Z-SJOR': '#2563eb', 'Z-SJOA': '#16a34a', 'Z-SJBO': '#f59e0b', 'Z-HORT': '#8b5cf6'};
-var CC = {feeder: '#dc2626', distribution: '#2563eb', drop: '#16a34a'};
+var ZC = {'Z-ERA': '#dc2626', 'Z-SJOR': '#2563eb', 'Z-SJOA': '#16a34a', 'Z-SJBO': '#f59e0b', 'Z-HORT': '#8b5cf6', 'Z-CARM': '#06b6d4', 'Z-CONC': '#d946ef', 'Z-ESTA': '#84cc16'};
+var CC = {feeder: '#dc2626', distribution: '#2563eb', drop: '#16a34a', 'olt_to_splice': '#dc2626', 'splice_to_splitter': '#2563eb', 'splice_to_box': '#2563eb', 'splitter_to_box': '#16a34a', 'box_to_client': '#16a34a'};
+var ZONE_BOUNDS = {
+  'Z-ERA': [[38.2320, -1.4250], [38.2420, -1.4160]],
+  'Z-SJOR': [[38.2350, -1.4200], [38.2440, -1.4110]],
+  'Z-SJOA': [[38.2360, -1.4220], [38.2420, -1.4140]],
+  'Z-SJBO': [[38.2380, -1.4190], [38.2480, -1.4100]],
+  'Z-HORT': [[38.2410, -1.4240], [38.2500, -1.4140]],
+  'Z-CARM': [[38.2380, -1.4190], [38.2440, -1.4130]],
+  'Z-CONC': [[38.2330, -1.4210], [38.2390, -1.4120]],
+  'Z-ESTA': [[38.2370, -1.4290], [38.2460, -1.4190]],
+  'ALL': [[38.2320, -1.4300], [38.2510, -1.4080]]
+};
 var STATUS_LABELS = {
   open: 'Abierto', assigned: 'Asignado', in_transit: 'En desplazamiento',
   in_progress: 'En trabajo', paused: 'Pausado', needs_material: 'Pendiente de material',
@@ -275,13 +286,23 @@ function NetworkMap() {
   var s3 = React.useState([]); var splices = s3[0], setSplices = s3[1];
   var s4 = React.useState([]); var splitters = s4[0], setSplitters = s4[1];
   var s5 = React.useState([]); var olts = s5[0], setOlts = s5[1];
-  var s6 = React.useState({feeder: true, distribution: true, drop: true, boxes: true, splices: true, splitters: true, olt: true});
-  var ly = s6[0], setLy = s6[1];
+  var s6 = React.useState([]); var zones = s6[0], setZones = s6[1];
+  var s7 = React.useState([]); var clients = s7[0], setClients = s7[1];
+  var s8 = React.useState('ALL'); var selectedZone = s8[0], setSelectedZone = s8[1];
+  var s9 = React.useState({feeder: true, distribution: true, drop: true, boxes: true, splices: true, splitters: true, olt: true, clients: true, labels: true});
+  var ly = s9[0], setLy = s9[1];
+  var s10 = React.useState(15); var zoom = s10[0], setZoom = s10[1];
   var mapR = React.useRef(null); var lm = React.useRef(null); var lr = React.useRef({});
 
   React.useEffect(function() {
-    Promise.all([fa('/api/segments/'), fa('/api/boxes/'), fa('/api/splices/'), fa('/api/splitters/'), fa('/api/olts/')]).then(function(r) {
-      setSegs(r[0] || []); setBoxes(r[1] || []); setSplices(r[2] || []); setSplitters(r[3] || []); setOlts(r[4] || []);
+    Promise.all([
+      fa('/api/segments/'), fa('/api/boxes/'), fa('/api/splices/'),
+      fa('/api/splitters/'), fa('/api/olts/'), fa('/api/zones/'),
+      fa('/api/clients/')
+    ]).then(function(r) {
+      setSegs(r[0] || []); setBoxes(r[1] || []); setSplices(r[2] || []);
+      setSplitters(r[3] || []); setOlts(r[4] || []); setZones(r[5] || []);
+      setClients(r[6] || []);
     });
   }, []);
 
@@ -289,51 +310,147 @@ function NetworkMap() {
     if (!lm.current && mapR.current) {
       lm.current = L.map(mapR.current).setView([38.2395, -1.4165], 15);
       L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {attribution: '&copy; OSM', maxZoom: 19}).addTo(lm.current);
+      setZoom(lm.current.getZoom());
+      lm.current.on('zoomend', function() { setZoom(lm.current.getZoom()); });
     }
     return function() { if (lm.current) { lm.current.remove(); lm.current = null; } };
   }, []);
 
   React.useEffect(function() {
     if (!lm.current) return;
+    if (selectedZone && ZONE_BOUNDS[selectedZone]) {
+      setTimeout(function() {
+        lm.current.fitBounds(ZONE_BOUNDS[selectedZone], {padding: [60, 60], maxZoom: 17});
+      }, 100);
+    }
+  }, [selectedZone]);
+
+  function inZone(item) {
+    if (!selectedZone || selectedZone === 'ALL') return true;
+    return item.zone_code === selectedZone || item.zone === selectedZone ||
+           (item.splitter && item.splitter.zone_code === selectedZone);
+  }
+
+  function segmentInZone(sg) {
+    if (!selectedZone || selectedZone === 'ALL') return true;
+    return sg.zone_code === selectedZone;
+  }
+
+  function clientInZone(c) {
+    if (!selectedZone || selectedZone === 'ALL') return true;
+    return c.zone_code === selectedZone;
+  }
+
+  function midpoint(coords) {
+    if (!coords || coords.length === 0) return [0, 0];
+    var idx = Math.floor(coords.length / 2);
+    return coords[idx];
+  }
+
+  function effectiveVisible(key) {
+    if (!ly[key]) return false;
+    if (key === 'clients') return zoom >= 16;
+    if (key === 'drop') return zoom >= 15;
+    if (key === 'labels') return zoom >= 15;
+    return true;
+  }
+
+  React.useEffect(function() {
+    if (!lm.current) return;
     Object.values(lr.current).forEach(function(l) { if (l && lm.current.hasLayer(l)) lm.current.removeLayer(l); });
     lr.current = {};
-    var gr = {feeder: L.layerGroup(), distribution: L.layerGroup(), drop: L.layerGroup(), boxes: L.layerGroup(), splices: L.layerGroup(), splitters: L.layerGroup(), olt: L.layerGroup()};
+    var gr = {
+      feeder: L.layerGroup(), distribution: L.layerGroup(), drop: L.layerGroup(),
+      boxes: L.layerGroup(), splices: L.layerGroup(), splitters: L.layerGroup(),
+      olt: L.layerGroup(), clients: L.layerGroup(), labels: L.layerGroup()
+    };
+
     if (ly.olt && olts[0]) {
       var o = olts[0];
-      L.marker([o.latitude, o.longitude], {icon: L.divIcon({className: '', html: '<div style="width:14px;height:14px;background:#dc2626;border:2px solid white;border-radius:50%"></div>', iconSize: [14, 14]})}).addTo(gr.olt).bindPopup('<b>' + o.code + '</b><br/>' + o.output_power_dbm + ' dBm');
+      L.marker([o.latitude, o.longitude], {
+        icon: L.divIcon({className: 'olt-marker', html: '<div class="olt-dot"></div><span class="olt-label">OLT</span>', iconSize: [40, 24], iconAnchor: [20, 12]})
+      }).addTo(gr.olt).bindPopup('<b>' + o.code + '</b><br/>' + o.output_power_dbm + ' dBm');
     }
+
     (segs || []).forEach(function(sg) {
       var st = sg.segment_type || 'drop';
-      if (!ly[st]) return;
+      // Mapear tipo de segmento a capa de visualizacion
+      var layerKey = st === 'olt_to_splice' ? 'feeder' :
+                     (st === 'splice_to_splitter' || st === 'splice_to_box') ? 'distribution' :
+                     (st === 'splitter_to_box' || st === 'box_to_client') ? 'drop' : st;
+      if (!effectiveVisible(layerKey)) return;
+      if (!segmentInZone(sg)) return;
       var rt = sg.route_as_list || [];
       if (rt.length < 2) return;
       var col = CC[st] || '#666';
-      var w = st === 'feeder' ? 4 : st === 'distribution' ? 3 : 2;
-      var ds = st === 'feeder' ? '10,5' : st === 'drop' ? '5,5' : null;
-      L.polyline(rt, {color: col, weight: w, dashArray: ds, opacity: 0.8}).addTo(gr[st]).bindPopup('<b>' + sg.cable_code + '</b><br/>' + st + '<br/>' + sg.length_m + 'm');
+      var w = st === 'olt_to_splice' ? 5 : st === 'splice_to_splitter' || st === 'splice_to_box' ? 4 : st === 'splitter_to_box' ? 3 : 2;
+      var ds = st === 'box_to_client' ? '4,4' : null;
+      var poly = L.polyline(rt, {color: col, weight: w, dashArray: ds, opacity: 0.85}).addTo(gr[layerKey]);
+      poly.bindPopup('<b>' + sg.cable_code + '</b><br/>' + (sg.origin_name || '') + ' → ' + (sg.destination_name || '') + '<br/>' + sg.length_m + 'm · fibra ' + (sg.fiber_numbers || '1'));
+
+      if (effectiveVisible('labels') && st !== 'box_to_client') {
+        var mp = midpoint(rt);
+        var label = L.divIcon({
+          className: 'cable-label',
+          html: '<span style="background:' + col + '20;color:' + col + ';border:1px solid ' + col + '">' + sg.cable_code + '</span>',
+          iconSize: [100, 12],
+          iconAnchor: [50, 6]
+        });
+        L.marker(mp, {icon: label, interactive: false, zIndexOffset: -500}).addTo(gr.labels);
+      }
     });
-    if (ly.splices) {
+
+    if (effectiveVisible('splices')) {
       (splices || []).forEach(function(sp) {
-        if (sp.latitude && sp.longitude)
-          L.circleMarker([sp.latitude, sp.longitude], {radius: 6, fillColor: '#111', color: '#fbbf24', weight: 2, fillOpacity: 0.9}).addTo(gr.splices).bindPopup('<b>' + sp.code + '</b><br/>' + (sp.zone_name || '') + '<br/>' + (sp.fibers_free || 0) + ' libres');
+        if (!sp.latitude || !sp.longitude) return;
+        if (!inZone(sp)) return;
+        L.circleMarker([sp.latitude, sp.longitude], {radius: 7, fillColor: '#111', color: '#fbbf24', weight: 2, fillOpacity: 0.9}).addTo(gr.splices).bindPopup('<b>' + sp.code + '</b><br/>' + (sp.zone_name || '') + '<br/>' + (sp.fibers_free || 0) + ' libres');
       });
     }
-    if (ly.splitters) {
+
+    if (effectiveVisible('splitters')) {
       (splitters || []).forEach(function(s) {
-        if (s.latitude && s.longitude)
-          L.circleMarker([s.latitude, s.longitude], {radius: 8, fillColor: '#f97316', color: '#fff', weight: 2, fillOpacity: 0.9}).addTo(gr.splitters).bindPopup('<b>' + s.code + '</b><br/>1:' + s.ratio);
+        if (!s.latitude || !s.longitude) return;
+        if (!inZone(s)) return;
+        L.circleMarker([s.latitude, s.longitude], {radius: 9, fillColor: '#f97316', color: '#fff', weight: 2, fillOpacity: 0.9}).addTo(gr.splitters).bindPopup('<b>' + s.code + '</b><br/>1:' + s.ratio);
       });
     }
-    if (ly.boxes) {
+
+    if (effectiveVisible('boxes')) {
       (boxes || []).forEach(function(b) {
         if (!b.latitude || !b.longitude) return;
+        if (!inZone(b)) return;
         var col = ZC[b.zone_code] || '#0ea5e9';
         var aff = (b.affected_count || 0) > 0;
-        L.circleMarker([b.latitude, b.longitude], {radius: aff ? 10 : 6, fillColor: col, color: aff ? '#dc2626' : '#fff', weight: aff ? 3 : 1.5, fillOpacity: aff ? 0.95 : 0.7}).addTo(gr.boxes).bindPopup('<b>' + b.code + '</b><br/>' + (b.name || '') + '<br/>' + (b.client_count || 0) + ' clientes');
+        var marker = L.circleMarker([b.latitude, b.longitude], {
+          radius: aff ? 13 : 7,
+          fillColor: col,
+          color: aff ? '#dc2626' : '#fff',
+          weight: aff ? 4 : 1.5,
+          fillOpacity: aff ? 1.0 : 0.75,
+          className: aff ? 'box-pulse' : ''
+        }).addTo(gr.boxes);
+        if (aff) {
+          L.marker([b.latitude, b.longitude], {
+            icon: L.divIcon({className: 'box-fault-icon', html: '!', iconSize: [20, 20], iconAnchor: [10, 18]})
+          }).addTo(gr.boxes);
+        }
+        marker.bindPopup('<b>' + b.code + '</b><br/>' + (b.name || '') + '<br/>' + (b.client_count || 0) + ' clientes' + (aff ? '<br/><span style="color:#dc2626;font-weight:700">CLIENTES AFECTADOS</span>' : ''));
       });
     }
-    Object.keys(gr).forEach(function(k) { if (ly[k] !== false) { gr[k].addTo(lm.current); lr.current[k] = gr[k]; } });
-  }, [segs, boxes, splices, splitters, olts, ly]);
+
+    if (effectiveVisible('clients')) {
+      (clients || []).forEach(function(c) {
+        if (!c.latitude || !c.longitude) return;
+        if (!clientInZone(c)) return;
+        var aff = c.status === 'affected';
+        var col = aff ? '#dc2626' : '#10b981';
+        L.circleMarker([c.latitude, c.longitude], {radius: aff ? 5 : 3, fillColor: col, color: '#fff', weight: aff ? 2 : 1, fillOpacity: 0.9}).addTo(gr.clients).bindPopup('<b>' + c.client_code + '</b><br/>' + c.full_name + '<br/>' + (c.address || ''));
+      });
+    }
+
+    Object.keys(gr).forEach(function(k) { if (effectiveVisible(k)) { gr[k].addTo(lm.current); lr.current[k] = gr[k]; } });
+  }, [segs, boxes, splices, splitters, olts, zones, clients, ly, selectedZone, zoom]);
 
   function toggleLayer(k) { setLy(function(p) { var n = {}; Object.keys(p).forEach(function(key) { n[key] = p[key]; }); n[k] = !p[k]; return n; }); }
   var layerBtns = [
@@ -341,17 +458,53 @@ function NetworkMap() {
     ['distribution', 'Distribution', 'bg-blue-100 text-blue-700 border-blue-300'],
     ['drop', 'Drop', 'bg-green-100 text-green-700 border-green-300'],
     ['boxes', 'Cajas', 'bg-gray-100 text-gray-700 border-gray-300'],
+    ['clients', 'Clientes', 'bg-emerald-100 text-emerald-700 border-emerald-300'],
     ['splices', 'Empalmes', 'bg-yellow-100 text-yellow-700 border-yellow-300'],
     ['splitters', 'Splitters', 'bg-orange-100 text-orange-700 border-orange-300'],
-    ['olt', 'OLT', 'bg-red-100 text-red-800 border-red-400']
+    ['olt', 'OLT', 'bg-red-100 text-red-800 border-red-400'],
+    ['labels', 'Etiquetas', 'bg-purple-100 text-purple-700 border-purple-300']
   ];
 
+  var stats = {
+    feeder: segs.filter(function(s) { return (s.segment_type || '') === 'olt_to_splice' && segmentInZone(s); }).length,
+    distribution: segs.filter(function(s) { return ((s.segment_type || '') === 'splice_to_splitter' || (s.segment_type || '') === 'splice_to_box') && segmentInZone(s); }).length,
+    drop: segs.filter(function(s) { return ((s.segment_type || '') === 'splitter_to_box' || (s.segment_type || '') === 'box_to_client') && segmentInZone(s); }).length,
+    boxes: (boxes || []).filter(function(b) { return inZone(b); }).length,
+    affected: (boxes || []).filter(function(b) { return inZone(b) && (b.affected_count || 0) > 0; }).length
+  };
+
   return ce('div', {className: 'max-w-7xl mx-auto px-4 py-4'}, [
-    ce('div', {className: 'flex flex-wrap gap-2 mb-3'}, layerBtns.map(function(item) {
+    ce('div', {className: 'flex flex-wrap items-center gap-3 mb-3'}, [
+      ce('select', {
+        value: selectedZone,
+        onChange: function(e) { setSelectedZone(e.target.value); },
+        className: 'px-3 py-1.5 border rounded-lg text-sm font-medium bg-white'
+      }, [
+        ce('option', {value: 'ALL'}, ['Todos los barrios'])
+      ].concat((zones || []).map(function(z) {
+        return ce('option', {key: z.code, value: z.code}, [z.name + ' (' + z.code + ')']);
+      })))
+    ].concat(layerBtns.map(function(item) {
       var k = item[0], l = item[1], c = item[2];
-      return ce('button', {key: k, onClick: function() { toggleLayer(k); }, className: 'px-3 py-1 rounded-lg text-xs font-medium border ' + (ly[k] ? c : 'bg-gray-50 text-gray-400')}, [(ly[k] ? '✓ ' : '✗ ') + l]);
-    })),
-    ce('div', {ref: mapR, style: {height: '75vh'}, className: 'bg-white rounded-xl shadow-sm border'})
+      var active = ly[k];
+      var dimmed = active && !effectiveVisible(k);
+      return ce('button', {
+        key: k,
+        onClick: function() { toggleLayer(k); },
+        title: dimmed ? 'Aumenta el zoom para ver esta capa' : '',
+        className: 'px-3 py-1 rounded-lg text-xs font-medium border ' + (active ? (dimmed ? c + ' opacity-60' : c) : 'bg-gray-50 text-gray-400')
+      }, [(active ? '✓ ' : '✗ ') + l + (dimmed ? ' (zoom)' : '')]);
+    }))),
+    ce('div', {className: 'relative'}, [
+      ce('div', {ref: mapR, style: {height: '75vh'}, className: 'bg-white rounded-xl shadow-sm border'}),
+      ce('div', {className: 'absolute top-2 right-2 bg-white/90 backdrop-blur rounded-lg shadow border text-xs px-3 py-2 space-y-1 pointer-events-none'}, [
+        ce('div', {className: 'font-semibold text-gray-700'}, ['Zoom: ' + zoom.toFixed(1)]),
+        ce('div', {className: 'text-red-600'}, ['Feeder: ' + stats.feeder]),
+        ce('div', {className: 'text-blue-600'}, ['Distribution: ' + stats.distribution]),
+        ce('div', {className: 'text-green-600'}, ['Drop: ' + stats.drop]),
+        ce('div', {className: 'text-gray-600'}, ['Cajas: ' + stats.boxes + (stats.affected ? ' ⚠' + stats.affected : '')])
+      ])
+    ])
   ]);
 }
 
@@ -445,11 +598,11 @@ function DiagnoseV2() {
     stepContent = ce('div', {className: 'bg-white rounded-xl shadow-sm border p-6'}, [
       ce('h2', {className: 'text-lg font-bold mb-2'}, ['Codigo de caja']),
       ce('div', {className: 'flex gap-2'}, [
-        ce('input', {type: 'text', value: bc, onChange: function(e) { setBc(e.target.value.toUpperCase()); }, placeholder: 'CTO-023', className: 'flex-1 px-4 py-2 border rounded-lg font-mono'}),
+        ce('input', {type: 'text', value: bc, onChange: function(e) { setBc(e.target.value.toUpperCase()); }, placeholder: 'CTO-0023', className: 'flex-1 px-4 py-2 border rounded-lg font-mono'}),
         ce('button', {onClick: searchBox, disabled: ld || !bc, className: 'px-4 py-2 bg-blue-600 text-white rounded-lg disabled:opacity-50'}, [ld ? '...' : 'Buscar'])
       ]),
       er ? ce('p', {className: 'text-red-600 text-sm mt-2'}, [er]) : null,
-      ce('div', {className: 'mt-4 flex flex-wrap gap-2'}, ['CTO-001', 'CTO-010', 'CTO-020', 'CTO-023'].map(function(c) {
+      ce('div', {className: 'mt-4 flex flex-wrap gap-2'}, ['CTO-0001', 'CTO-0010', 'CTO-0020', 'CTO-0023'].map(function(c) {
         return ce('button', {key: c, onClick: function() { setBc(c); }, className: 'text-xs bg-gray-100 border rounded px-2 py-1 hover:bg-blue-100'}, [c]);
       }))
     ]);
@@ -500,6 +653,15 @@ function DiagnoseV2() {
       res.recommended_action ? ce('div', {className: 'bg-white rounded-xl shadow-sm border p-4'}, [
         ce('h3', {className: 'font-bold mb-2'}, ['ACCION RECOMENDADA']),
         ce('div', {className: 'bg-blue-50 rounded-lg border border-blue-100 p-3 space-y-2'}, [ce('p', {className: 'text-sm text-blue-900 whitespace-pre-line'}, [res.recommended_action])])
+      ]) : null,
+      res.possible_solutions && res.possible_solutions.length > 0 ? ce('div', {className: 'bg-white rounded-xl shadow-sm border p-4'}, [
+        ce('h3', {className: 'font-bold mb-2'}, ['POSIBLES SOLUCIONES']),
+        ce('ul', {className: 'space-y-2'}, (res.possible_solutions || []).map(function(sol, i) {
+          return ce('li', {key: i, className: 'flex items-start gap-2 text-sm'}, [
+            ce('span', {className: 'flex-shrink-0 w-5 h-5 rounded-full bg-green-100 text-green-700 text-xs font-bold flex items-center justify-center'}, [String(i + 1)]),
+            ce('span', {className: 'text-gray-700'}, [sol])
+          ]);
+        }))
       ]) : null,
       res.affected_clients && res.affected_clients.length > 0 ? ce('div', {className: 'bg-white rounded-xl shadow-sm border p-4'}, [
         ce('h3', {className: 'font-bold mb-2'}, ['CLIENTES AFECTADOS (' + res.affected_clients.length + ')']),

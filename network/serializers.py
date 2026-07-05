@@ -102,6 +102,7 @@ class CableSegmentSerializer(serializers.ModelSerializer):
     fiber_numbers_list = serializers.ReadOnlyField()
     origin_name = serializers.SerializerMethodField()
     destination_name = serializers.SerializerMethodField()
+    zone_code = serializers.SerializerMethodField()
 
     def get_origin_name(self, obj):
         el = obj.origin_element
@@ -110,6 +111,16 @@ class CableSegmentSerializer(serializers.ModelSerializer):
     def get_destination_name(self, obj):
         el = obj.destination_element
         return getattr(el, 'code', getattr(el, 'name', str(el))) if el else None
+
+    def get_zone_code(self, obj):
+        """Devuelve el codigo de zona del elemento destino u origen."""
+        dest = obj.destination_element
+        if hasattr(dest, 'zone'):
+            return getattr(dest.zone, 'code', None)
+        orig = obj.origin_element
+        if hasattr(orig, 'zone'):
+            return getattr(orig.zone, 'code', None)
+        return None
 
     class Meta:
         model = CableSegment

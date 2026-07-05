@@ -610,6 +610,9 @@ def diagnose_v2(request):
     # 9c. Generar instrucciones paso a paso con direcciones
     instructions = _generate_diagnose_instructions(box, affected_segment_data, affected_clients, severity)
 
+    # 9d. Posibles soluciones concretas segun el tipo de fallo
+    possible_solutions = _get_possible_solutions(box, affected_segment_data, severity, power_status)
+
     # 10. Clientes afectados serializados
     clients_data = ClientListSerializer(affected_clients, many=True).data
 
@@ -629,6 +632,7 @@ def diagnose_v2(request):
             'address': box.address,
         },
         'recommended_action': instructions,
+        'possible_solutions': possible_solutions,
         'affected_clients': clients_data,
         'affected_route': affected_route,
         'affected_count': affected_count,
@@ -711,6 +715,51 @@ def _generate_diagnose_instructions(box, segment, affected_clients, severity):
         )
 
     return "\n".join(lines)
+
+
+def _get_possible_solutions(box, segment, severity, power_status):
+    """Devuelve una lista de soluciones concretas ordenadas por probabilidad."""
+    solutions = []
+
+    if power_status == 'CORTE TOTAL':
+        solutions.append(
+            'Reparar o empalmar la fibra cortada en el tramo ' +
+            (segment.cable.code if segment and segment.cable else 'desconocido') +
+            '. Verificar con OTDR la distancia exacta del corte.'
+        )
+        solutions.append(
+            'Revisar conectores y adaptadores en ' + box.splitter.code +
+            ' y en ' + box.code + ': limpiar, reapuntar o reemplazar si estan quemados.'
+        )
+        if segment and segment.length_m and segment.length_m > 200:
+            solutions.append(
+                'Inspeccionar canalizacion subterranea/aerea en el recorrido de ' +
+                str(segment.length_m) + 'm: buscar roturas por obras, arbolado o roedores.'
+            )
+    elif power_status == 'PERDIDA SEVERA':
+        solutions.append(
+            'Limpiar y reapuntar conectores en ambos extremos del cable ' +
+            (segment.cable.code if segment and segment.cable else 'afectado') + '.'
+        )
+        solutions.append(
+            'Sustituir splitter ' + box.splitter.code + ' si la perdida es uniforme en todos los puertos.'
+        )
+        solutions.append('Revisar empalmes intermedios: mala fusion o macrocurvatura.')
+    elif power_status == 'PERDIDA MODERADA':
+        solutions.append('Revisar y limpiar conector de entrada de la caja ' + box.code + '.')
+        solutions.append('Verificar macrocurvaturas en el cable de drop y tendido interior.')
+        solutions.append('Comprobar estado de la ONT/Receptor del cliente.')
+    else:
+        solutions.append('Verificar configuracion de la ONT y reiniciar equipo.')
+        solutions.append('Comprobar que no haya saturacion del receptor (potencia demasiado alta).')
+
+    if severity == 'critical':
+        solutions.insert(0, 'Escalar al NOC y coordinar cierre de calle/zona si el corte afecta a multiples cajas.')
+        solutions.insert(1, 'Revisar splitter principal ' + box.splitter.code + ' y cable de distribucion compartido.')
+    elif severity == 'high':
+        solutions.insert(0, 'Priorizar visita a la caja ' + box.code + ': multiples clientes afectados.')
+
+    return solutions
 
 
 @api_view(['GET'])
